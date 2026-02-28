@@ -1,0 +1,35 @@
+{
+  "name": "@obtrace/sdk-browser",
+  "version": "1.0.0",
+  "description": "Obtrace Browser SDK with frontend wrappers",
+  "type": "module",
+  "license": "UNLICENSED",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/types/browser_entry.d.ts",
+      "import": "./dist/browser_entry.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.7.3"
+  }
+}

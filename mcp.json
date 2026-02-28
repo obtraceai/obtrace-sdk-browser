@@ -1,0 +1,14 @@
+{
+  "name": "obtrace-sdk-browser",
+  "language": "typescript",
+  "entrypoints": [
+    "src/index.ts",
+    "src/browser_entry.ts"
+  ],
+  "docs": [
+    "docs/getting-started.md",
+    "docs/browser.md",
+    "docs/security.md",
+    "docs/troubleshooting.md"
+  ]
+}

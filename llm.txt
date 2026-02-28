@@ -1,0 +1,6 @@
+# obtrace-sdk-browser context
+
+- Package: @obtrace/sdk-browser
+- Runtime: browser only
+- Includes frontend wrappers (vite/react/next/vue/angular/svelte)
+- Ingest base URL default in examples: https://inject.obtrace.ai
