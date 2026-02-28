@@ -3,9 +3,19 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: "daily"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 15
+    labels:
+      - "dependencies"
+      - "automerge"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
+      time: "05:30"
+      timezone: "Etc/UTC"
+    labels:
+      - "dependencies"
+      - "automerge"
