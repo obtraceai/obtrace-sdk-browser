@@ -37,16 +37,3 @@ const cfg = createViteConfigFromImportMetaEnv(import.meta.env, {
 
 const sdk = initViteBrowserSDK(cfg);
 ```
-
-## Minimal Node/Bun setup
-
-```ts
-import { initNodeSDK } from "@obtrace/sdk-browser/node";
-
-const sdk = initNodeSDK({
-  apiKey: process.env.OBTRACE_API_KEY!,
-  ingestBaseUrl: process.env.OBTRACE_INGEST_BASE_URL!,
-  serviceName: "api-service",
-  env: "prod"
-});
-```
