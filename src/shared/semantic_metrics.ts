@@ -24,3 +24,9 @@ export const SemanticMetrics = {
 } as const;
 
 export type SemanticMetricName = (typeof SemanticMetrics)[keyof typeof SemanticMetrics];
+
+const semanticMetricSet = new Set<string>(Object.values(SemanticMetrics));
+
+export function isSemanticMetricName(name: string): name is SemanticMetricName {
+  return semanticMetricSet.has(name);
+}

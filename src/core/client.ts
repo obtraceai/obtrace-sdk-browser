@@ -1,4 +1,5 @@
 import type { LogLevel, ObtraceSDKConfig, QueuedPayload, ReplayChunk, ReplayStep, SDKContext } from "../shared/types";
+import { isSemanticMetricName } from "../shared/semantic_metrics";
 import { createTraceparent, extractPropagation, nowUnixNano, randomHex } from "../shared/utils";
 import { buildLogsPayload, buildMetricPayload, buildSpanPayload } from "./otlp";
 
@@ -59,6 +60,10 @@ export class ObtraceClient {
   }
 
   metric(name: string, value: number, unit?: string, context?: SDKContext): void {
+    if (this.config.validateSemanticMetrics && !isSemanticMetricName(name) && this.config.debug) {
+      // eslint-disable-next-line no-console
+      console.warn(`[obtrace-sdk-browser] non-canonical metric name: ${name}`);
+    }
     const body = buildMetricPayload({
       resource: this.resource(),
       scope: this.scope(),

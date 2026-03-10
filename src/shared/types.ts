@@ -43,6 +43,7 @@ export interface ObtraceSDKConfig {
     headerName?: string;
     sessionHeaderName?: string;
   };
+  validateSemanticMetrics?: boolean;
   debug?: boolean;
 }
 
