@@ -1,0 +1,26 @@
+export const SemanticMetrics = {
+  throughput: "http_requests_total",
+  errorRate: "http_5xx_total",
+  latencyP95: "latency_p95",
+  runtimeCpuUtilization: "runtime.cpu.utilization",
+  runtimeMemoryUsage: "runtime.memory.usage",
+  runtimeThreadCount: "runtime.thread.count",
+  runtimeGcPause: "runtime.gc.pause",
+  runtimeEventloopLag: "runtime.eventloop.lag",
+  clusterCpuUtilization: "cluster.cpu.utilization",
+  clusterMemoryUsage: "cluster.memory.usage",
+  clusterNodeCount: "cluster.node.count",
+  clusterPodCount: "cluster.pod.count",
+  dbOperationLatency: "db.operation.latency",
+  dbClientErrors: "db.client.errors",
+  dbConnectionsUsage: "db.connections.usage",
+  messagingConsumerLag: "messaging.consumer.lag",
+  webVitalLcp: "web.vital.lcp",
+  webVitalFcp: "web.vital.fcp",
+  webVitalInp: "web.vital.inp",
+  webVitalCls: "web.vital.cls",
+  webVitalTtfb: "web.vital.ttfb",
+  userActions: "obtrace.sim.web.react.actions",
+} as const;
+
+export type SemanticMetricName = (typeof SemanticMetrics)[keyof typeof SemanticMetrics];

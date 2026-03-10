@@ -1,5 +1,7 @@
 export { initBrowserSDK } from "./browser/index";
 export type { BrowserSDK } from "./browser/index";
+export { SemanticMetrics } from "./shared/semantic_metrics";
+export type { SemanticMetricName } from "./shared/semantic_metrics";
 
 export { initNextBrowserSDK, withNextFetchInstrumentation } from "./wrappers/frontend/next";
 export { initViteBrowserSDK, createViteConfigFromImportMetaEnv } from "./wrappers/frontend/vite";
