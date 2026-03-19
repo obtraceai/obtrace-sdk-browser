@@ -12,6 +12,24 @@ bun add @obtrace/sdk-browser
 
 ## Quickstart
 
+### Simplified setup
+
+The API key resolves `tenant_id`, `project_id`, `app_id`, and `env` automatically on the server side, so only three fields are needed:
+
+```ts
+import { initBrowserSDK } from "@obtrace/sdk-browser/browser";
+
+const sdk = initBrowserSDK({
+  apiKey: "obt_live_...",
+  ingestBaseUrl: "https://ingest.obtrace.io",
+  serviceName: "web-app",
+});
+```
+
+### Full configuration
+
+For advanced use cases you can override the resolved values explicitly:
+
 ```ts
 import { initBrowserSDK, SemanticMetrics } from "@obtrace/sdk-browser/browser";
 
