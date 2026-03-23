@@ -72,6 +72,8 @@ export function buildLogsPayload(input: {
                 timeUnixNano: nowUnixNano(),
                 severityText: input.level.toUpperCase(),
                 body: { stringValue: input.body },
+                traceId: input.context?.traceId || "",
+                spanId: input.context?.spanId || "",
                 attributes: attrKV(contextAttrs)
               }
             ]

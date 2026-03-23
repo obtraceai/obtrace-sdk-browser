@@ -28,6 +28,8 @@ interface InstanceEntry {
 }
 
 const instances = new Set<InstanceEntry>();
+
+let activeTraceContext: { traceId: string; spanId: string } | null = null;
 const replayBuffers = new Set<BrowserReplayBuffer>();
 
 let consolePatched = false;
@@ -61,29 +63,33 @@ function installSharedConsoleCapture(): void {
   const orig = originalConsole;
   console.debug = (...args: unknown[]) => {
     const msg = args.map(String).join(" ");
+    const trace = activeTraceContext;
     for (const entry of instances) {
-      entry.client.log("debug", msg, { sessionId: entry.sessionId });
+      entry.client.log("debug", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
     }
     orig.debug(...args);
   };
   console.info = (...args: unknown[]) => {
     const msg = args.map(String).join(" ");
+    const trace = activeTraceContext;
     for (const entry of instances) {
-      entry.client.log("info", msg, { sessionId: entry.sessionId });
+      entry.client.log("info", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
     }
     orig.info(...args);
   };
   console.warn = (...args: unknown[]) => {
     const msg = args.map(String).join(" ");
+    const trace = activeTraceContext;
     for (const entry of instances) {
-      entry.client.log("warn", msg, { sessionId: entry.sessionId });
+      entry.client.log("warn", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
     }
     orig.warn(...args);
   };
   console.error = (...args: unknown[]) => {
     const msg = args.map(String).join(" ");
+    const trace = activeTraceContext;
     for (const entry of instances) {
-      entry.client.log("error", msg, { sessionId: entry.sessionId });
+      entry.client.log("error", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
     }
     orig.error(...args);
   };
@@ -318,12 +324,22 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   }
 
   const log = (level: "debug" | "info" | "warn" | "error" | "fatal", message: string, context?: SDKContext) => {
-    client.log(level, message, { ...context, sessionId: replay.sessionId });
+    const ctx: SDKContext = { ...context, sessionId: replay.sessionId };
+    if (!ctx.traceId && activeTraceContext) {
+      ctx.traceId = activeTraceContext.traceId;
+      ctx.spanId = activeTraceContext.spanId;
+    }
+    client.log(level, message, ctx);
   };
 
   const captureException = (error: unknown, context?: SDKContext) => {
     const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    client.log("error", msg, { ...context, sessionId: replay.sessionId });
+    const ctx: SDKContext = { ...context, sessionId: replay.sessionId };
+    if (!ctx.traceId && activeTraceContext) {
+      ctx.traceId = activeTraceContext.traceId;
+      ctx.spanId = activeTraceContext.spanId;
+    }
+    client.log("error", msg, ctx);
   };
 
   const captureReplayEvent = (type: string, payload: Record<string, unknown>) => {
@@ -359,6 +375,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
       const incoming = extractPropagation(init?.headers);
       const traceId = incoming?.traceId ?? randomHex(16);
       const spanId = randomHex(8);
+      activeTraceContext = { traceId, spanId };
 
       const headers = client.injectPropagation(init?.headers, {
         traceId,
