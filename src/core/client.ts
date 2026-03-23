@@ -8,6 +8,9 @@ export class ObtraceClient {
   private readonly queue: QueuedPayload[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private active = true;
+  private circuitFailures = 0;
+  private circuitOpenUntil = 0;
+  replayTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: ObtraceSDKConfig) {
     if (!config.apiKey || !config.ingestBaseUrl || !config.serviceName) {
@@ -41,6 +44,10 @@ export class ObtraceClient {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
+    if (this.replayTimer) {
+      clearInterval(this.replayTimer);
+      this.replayTimer = null;
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -53,7 +60,7 @@ export class ObtraceClient {
       resource: this.resource(),
       scope: this.scope(),
       level,
-      body: message,
+      body: this.truncate(message, 32768),
       context
     });
     this.enqueue({ endpoint: "/otlp/v1/logs", contentType: "application/json", body });
@@ -67,7 +74,7 @@ export class ObtraceClient {
     const body = buildMetricPayload({
       resource: this.resource(),
       scope: this.scope(),
-      metricName: name,
+      metricName: this.truncate(name, 1024),
       value,
       unit,
       context
@@ -91,10 +98,19 @@ export class ObtraceClient {
     const start = input.startUnixNano ?? `${Date.now()}000000`;
     const end = input.endUnixNano ?? `${Date.now()}000000`;
 
+    let attrs = input.attrs;
+    if (attrs) {
+      attrs = { ...attrs };
+      for (const key of Object.keys(attrs)) {
+        const v = attrs[key];
+        if (typeof v === "string") attrs[key] = this.truncate(v, 4096);
+      }
+    }
+
     const body = buildSpanPayload({
       resource: this.resource(),
       scope: this.scope(),
-      name: input.name,
+      name: this.truncate(input.name, 32768),
       traceId,
       spanId,
       parentSpanId: input.parentSpanId,
@@ -102,7 +118,7 @@ export class ObtraceClient {
       endUnixNano: end,
       statusCode: input.statusCode,
       statusMessage: input.statusMessage,
-      attrs: input.attrs
+      attrs
     });
 
     this.enqueue({ endpoint: "/otlp/v1/traces", contentType: "application/json", body });
@@ -232,14 +248,45 @@ export class ObtraceClient {
     if (!this.queue.length) {
       return;
     }
-    const batch = this.queue.splice(0, this.queue.length);
+    const now = Date.now();
+    if (now < this.circuitOpenUntil) {
+      return;
+    }
+    const halfOpen = this.circuitFailures >= 5;
+    const batch = halfOpen ? this.queue.splice(0, 1) : this.queue.splice(0, this.queue.length);
     for (const item of batch) {
       try {
         await this.send(item);
-      } catch (err) {
-        if (this.config.debug) {
-          // eslint-disable-next-line no-console
-          console.error("[obtrace-sdk] send failed", err);
+        if (this.circuitFailures > 0) {
+          if (this.config.debug) {
+            console.warn("[obtrace-sdk] circuit breaker closed");
+          }
+          this.circuitFailures = 0;
+          this.circuitOpenUntil = 0;
+        }
+      } catch {
+        try {
+          await new Promise((r) => setTimeout(r, 500));
+          await this.send(item);
+          if (this.circuitFailures > 0) {
+            if (this.config.debug) {
+              console.warn("[obtrace-sdk] circuit breaker closed");
+            }
+            this.circuitFailures = 0;
+            this.circuitOpenUntil = 0;
+          }
+        } catch (retryErr) {
+          this.circuitFailures++;
+          if (this.circuitFailures >= 5) {
+            this.circuitOpenUntil = Date.now() + 30000;
+            if (this.config.debug) {
+              console.warn("[obtrace-sdk] circuit breaker opened");
+            }
+          }
+          if (this.config.debug) {
+            // eslint-disable-next-line no-console
+            console.error("[obtrace-sdk] send failed after retry", retryErr);
+          }
         }
       }
     }
@@ -280,6 +327,11 @@ export class ObtraceClient {
       appId: this.config.appId,
       env: this.config.env
     };
+  }
+
+  private truncate(s: string, max: number): string {
+    if (s.length <= max) return s;
+    return s.slice(0, max) + "...[truncated]";
   }
 
   private resource() {

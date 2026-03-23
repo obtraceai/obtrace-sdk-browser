@@ -19,6 +19,215 @@ export interface BrowserSDK {
   shutdown: () => Promise<void>;
 }
 
+interface InstanceEntry {
+  client: ObtraceClient;
+  sessionId: string;
+  replay: BrowserReplayBuffer;
+  config: ObtraceSDKConfig;
+  recipeSteps: ReplayStep[];
+}
+
+const instances = new Set<InstanceEntry>();
+const replayBuffers = new Set<BrowserReplayBuffer>();
+
+let consolePatched = false;
+let originalConsole: {
+  debug: typeof console.debug;
+  info: typeof console.info;
+  warn: typeof console.warn;
+  error: typeof console.error;
+} | null = null;
+
+let navigationPatched = false;
+let originalPushState: History["pushState"] | null = null;
+let originalReplaceState: History["replaceState"] | null = null;
+let navigationPopstateHandler: (() => void) | null = null;
+let navigationHashchangeHandler: (() => void) | null = null;
+
+let rrwebRecording = false;
+let stopRrwebRecording: (() => void) | null = null;
+
+function installSharedConsoleCapture(): void {
+  if (consolePatched || typeof window === "undefined") {
+    return;
+  }
+  consolePatched = true;
+  originalConsole = {
+    debug: console.debug.bind(console),
+    info: console.info.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+  };
+  const orig = originalConsole;
+  console.debug = (...args: unknown[]) => {
+    const msg = args.map(String).join(" ");
+    for (const entry of instances) {
+      entry.client.log("debug", msg, { sessionId: entry.sessionId });
+    }
+    orig.debug(...args);
+  };
+  console.info = (...args: unknown[]) => {
+    const msg = args.map(String).join(" ");
+    for (const entry of instances) {
+      entry.client.log("info", msg, { sessionId: entry.sessionId });
+    }
+    orig.info(...args);
+  };
+  console.warn = (...args: unknown[]) => {
+    const msg = args.map(String).join(" ");
+    for (const entry of instances) {
+      entry.client.log("warn", msg, { sessionId: entry.sessionId });
+    }
+    orig.warn(...args);
+  };
+  console.error = (...args: unknown[]) => {
+    const msg = args.map(String).join(" ");
+    for (const entry of instances) {
+      entry.client.log("error", msg, { sessionId: entry.sessionId });
+    }
+    orig.error(...args);
+  };
+}
+
+function teardownSharedConsoleCapture(): void {
+  if (!consolePatched || !originalConsole) {
+    return;
+  }
+  console.debug = originalConsole.debug;
+  console.info = originalConsole.info;
+  console.warn = originalConsole.warn;
+  console.error = originalConsole.error;
+  originalConsole = null;
+  consolePatched = false;
+}
+
+function fanOutNavigation(): void {
+  for (const entry of instances) {
+    const chunk = entry.replay.pushCustomEvent("navigation", {
+      href: window.location.href,
+      title: document.title,
+    });
+    if (chunk) {
+      entry.client.replayChunk(chunk);
+    }
+  }
+}
+
+function installSharedNavigationTracker(): void {
+  if (navigationPatched || typeof window === "undefined") {
+    return;
+  }
+  navigationPatched = true;
+
+  const historyRef = window.history;
+  originalPushState = historyRef.pushState.bind(historyRef);
+  originalReplaceState = historyRef.replaceState.bind(historyRef);
+  const rawPush = originalPushState;
+  const rawReplace = originalReplaceState;
+
+  historyRef.pushState = ((...args: unknown[]) => {
+    rawPush(...(args as [data: unknown, unused: string, url?: string | URL | null]));
+    fanOutNavigation();
+  }) as History["pushState"];
+
+  historyRef.replaceState = ((...args: unknown[]) => {
+    rawReplace(...(args as [data: unknown, unused: string, url?: string | URL | null]));
+    fanOutNavigation();
+  }) as History["replaceState"];
+
+  navigationPopstateHandler = fanOutNavigation;
+  navigationHashchangeHandler = fanOutNavigation;
+  window.addEventListener("popstate", navigationPopstateHandler);
+  window.addEventListener("hashchange", navigationHashchangeHandler);
+}
+
+function teardownSharedNavigationTracker(): void {
+  if (!navigationPatched || typeof window === "undefined") {
+    return;
+  }
+  if (originalPushState) {
+    window.history.pushState = originalPushState;
+  }
+  if (originalReplaceState) {
+    window.history.replaceState = originalReplaceState;
+  }
+  if (navigationPopstateHandler) {
+    window.removeEventListener("popstate", navigationPopstateHandler);
+  }
+  if (navigationHashchangeHandler) {
+    window.removeEventListener("hashchange", navigationHashchangeHandler);
+  }
+  originalPushState = null;
+  originalReplaceState = null;
+  navigationPopstateHandler = null;
+  navigationHashchangeHandler = null;
+  navigationPatched = false;
+}
+
+function installSharedRrwebRecording(config: ObtraceSDKConfig): void {
+  if (rrwebRecording || typeof window === "undefined") {
+    return;
+  }
+  rrwebRecording = true;
+
+  const replayCfg = config.replay ?? { enabled: true };
+  const stop = record({
+    emit(event) {
+      for (const buf of replayBuffers) {
+        const chunk = buf.pushRrwebEvent(event);
+        if (chunk) {
+          for (const entry of instances) {
+            if (entry.replay === buf) {
+              entry.client.replayChunk(chunk);
+              break;
+            }
+          }
+        }
+      }
+    },
+    maskAllInputs: replayCfg.maskAllInputs ?? true,
+    maskInputOptions: {
+      password: true,
+      email: true,
+      tel: true,
+    },
+    maskInputFn: (text, element) => {
+      const el = element as HTMLInputElement;
+      const n = (el?.name || "").toLowerCase();
+      const id = (el?.id || "").toLowerCase();
+      if (/(pass|token|secret|key|email|cpf|ssn|credit|card)/.test(`${n} ${id}`)) {
+        return "[redacted]";
+      }
+      return text;
+    },
+    blockClass: replayCfg.blockClass ?? "ob-block",
+    maskTextClass: replayCfg.maskTextClass ?? "ob-mask",
+    inlineStylesheet: true,
+    collectFonts: false,
+    sampling: {
+      mousemove: replayCfg.sampling?.mousemove ?? true,
+      mouseInteraction: true,
+      scroll: replayCfg.sampling?.scroll ?? 150,
+      input: replayCfg.sampling?.input ?? "last",
+    },
+  });
+
+  if (stop) {
+    stopRrwebRecording = stop;
+  }
+}
+
+function teardownSharedRrwebRecording(): void {
+  if (!rrwebRecording) {
+    return;
+  }
+  if (stopRrwebRecording) {
+    stopRrwebRecording();
+    stopRrwebRecording = null;
+  }
+  rrwebRecording = false;
+}
+
 export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const client = new ObtraceClient({
     ...config,
@@ -50,69 +259,54 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const recipeSteps: ReplayStep[] = [];
   const cleanups: Array<() => void> = [];
 
+  const entry: InstanceEntry = {
+    client,
+    sessionId: replay.sessionId,
+    replay,
+    config,
+    recipeSteps,
+  };
+
+  instances.add(entry);
+  replayBuffers.add(replay);
+
   if (config.vitals?.enabled !== false) {
     cleanups.push(installWebVitals(client, !!config.vitals?.reportAllChanges));
   }
 
   cleanups.push(installBrowserErrorHooks(client, replay.sessionId));
-  cleanups.push(installConsoleCapture(client, replay.sessionId));
+
+  installSharedConsoleCapture();
 
   if (config.replay?.enabled !== false && typeof window !== "undefined") {
-    const replayCfg = config.replay ?? { enabled: true };
-    const stopRecording = record({
-      emit(event) {
-        const chunk = replay.pushRrwebEvent(event);
-        if (chunk) {
-          client.replayChunk(chunk);
-        }
-      },
-      maskAllInputs: replayCfg.maskAllInputs ?? true,
-      maskInputOptions: {
-        password: true,
-        email: true,
-        tel: true,
-      },
-      maskInputFn: (text, element) => {
-        const el = element as HTMLInputElement;
-        const n = (el?.name || "").toLowerCase();
-        const id = (el?.id || "").toLowerCase();
-        if (/(pass|token|secret|key|email|cpf|ssn|credit|card)/.test(`${n} ${id}`)) {
-          return "[redacted]";
-        }
-        return text;
-      },
-      blockClass: replayCfg.blockClass ?? "ob-block",
-      maskTextClass: replayCfg.maskTextClass ?? "ob-mask",
-      inlineStylesheet: true,
-      collectFonts: false,
-      sampling: {
-        mousemove: replayCfg.sampling?.mousemove ?? true,
-        mouseInteraction: true,
-        scroll: replayCfg.sampling?.scroll ?? 150,
-        input: replayCfg.sampling?.input ?? "last",
-      },
-    });
-    if (stopRecording) {
-      cleanups.push(stopRecording);
-    }
-
-    cleanups.push(installNavigationTracker(replay, client));
+    installSharedRrwebRecording(config);
+    installSharedNavigationTracker();
   }
 
-  const replayTimer = setInterval(() => {
+  client.replayTimer = setInterval(() => {
     const chunk = replay.flush();
     if (chunk) {
       client.replayChunk(chunk);
     }
   }, config.replay?.flushIntervalMs ?? 5000);
+  const replayTimer = client.replayTimer;
+  const sendViaBeacon = () => {
+    const chunk = replay.flush();
+    if (chunk) {
+      const url = `${config.ingestBaseUrl?.replace(/\/$/, "")}/ingest/replay/chunk`;
+      const blob = new Blob([JSON.stringify(chunk)], { type: "application/json" });
+      navigator.sendBeacon(url, blob);
+    }
+  };
   const onVisibility = () => {
     if (document.visibilityState === "hidden") {
       flushReplay();
-      void client.flush();
+      client.flush().catch(() => {});
     }
   };
   const onBeforeUnload = () => {
-    flushReplay();
+    sendViaBeacon();
+    client.flush().catch(() => {});
   };
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility);
@@ -261,10 +455,20 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
   const shutdown = async () => {
     clearInterval(replayTimer);
-    flushReplay();
+    try { flushReplay(); } catch {}
     for (const c of cleanups) {
-      c();
+      try { c(); } catch {}
     }
+
+    instances.delete(entry);
+    replayBuffers.delete(replay);
+
+    if (instances.size === 0) {
+      teardownSharedConsoleCapture();
+      teardownSharedNavigationTracker();
+      teardownSharedRrwebRecording();
+    }
+
     await client.shutdown();
   };
 
@@ -279,77 +483,5 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     captureRecipe,
     instrumentFetch,
     shutdown,
-  };
-}
-
-function installNavigationTracker(replay: BrowserReplayBuffer, client: ObtraceClient): () => void {
-  if (typeof window === "undefined") {
-    return () => undefined;
-  }
-
-  const nav = () => {
-    const chunk = replay.pushCustomEvent("navigation", {
-      href: window.location.href,
-      title: document.title,
-    });
-    if (chunk) {
-      client.replayChunk(chunk);
-    }
-  };
-
-  const historyRef = window.history;
-  const rawPush = historyRef.pushState.bind(historyRef);
-  const rawReplace = historyRef.replaceState.bind(historyRef);
-  historyRef.pushState = ((...args: unknown[]) => {
-    rawPush(...(args as [data: unknown, unused: string, url?: string | URL | null]));
-    nav();
-  }) as History["pushState"];
-  historyRef.replaceState = ((...args: unknown[]) => {
-    rawReplace(...(args as [data: unknown, unused: string, url?: string | URL | null]));
-    nav();
-  }) as History["replaceState"];
-
-  window.addEventListener("popstate", nav);
-  window.addEventListener("hashchange", nav);
-
-  return () => {
-    historyRef.pushState = rawPush;
-    historyRef.replaceState = rawReplace;
-    window.removeEventListener("popstate", nav);
-    window.removeEventListener("hashchange", nav);
-  };
-}
-
-function installConsoleCapture(client: ObtraceClient, sessionId: string): () => void {
-  if (typeof window === "undefined") {
-    return () => undefined;
-  }
-  const orig = {
-    debug: console.debug.bind(console),
-    info: console.info.bind(console),
-    warn: console.warn.bind(console),
-    error: console.error.bind(console),
-  };
-  console.debug = (...args: unknown[]) => {
-    client.log("debug", args.map(String).join(" "), { sessionId });
-    orig.debug(...args);
-  };
-  console.info = (...args: unknown[]) => {
-    client.log("info", args.map(String).join(" "), { sessionId });
-    orig.info(...args);
-  };
-  console.warn = (...args: unknown[]) => {
-    client.log("warn", args.map(String).join(" "), { sessionId });
-    orig.warn(...args);
-  };
-  console.error = (...args: unknown[]) => {
-    client.log("error", args.map(String).join(" "), { sessionId });
-    orig.error(...args);
-  };
-  return () => {
-    console.debug = orig.debug;
-    console.info = orig.info;
-    console.warn = orig.warn;
-    console.error = orig.error;
   };
 }

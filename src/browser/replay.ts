@@ -14,6 +14,7 @@ export class BrowserReplayBuffer {
   private readonly replayId: string;
   private seq = 0;
   private events: eventWithTime[] = [];
+  private bytesEstimate: number = 0;
   private chunkStartedAt = Date.now();
 
   constructor(cfg: ReplayBufferConfig) {
@@ -27,7 +28,8 @@ export class BrowserReplayBuffer {
 
   pushRrwebEvent(event: eventWithTime): ReplayChunk | null {
     this.events.push(event);
-    if (this.currentBytes() >= this.cfg.maxChunkBytes) {
+    this.bytesEstimate += JSON.stringify(event).length + 1;
+    if (this.bytesEstimate >= this.cfg.maxChunkBytes) {
       return this.flush();
     }
     return null;
@@ -57,6 +59,7 @@ export class BrowserReplayBuffer {
 
     this.seq += 1;
     this.events = [];
+    this.bytesEstimate = 0;
     this.chunkStartedAt = Date.now();
     return out;
   }
@@ -97,10 +100,6 @@ export class BrowserReplayBuffer {
       return toBase64(JSON.stringify(body));
     }
     return undefined;
-  }
-
-  private currentBytes(): number {
-    return JSON.stringify(this.events).length;
   }
 
   private resolveReplayId(): string {
