@@ -33,6 +33,10 @@ export interface ObtraceSDKConfig {
     maxChunkBytes?: number;
     captureNetworkRecipes?: boolean;
     sessionStorageKey?: string;
+    blockClass?: string;
+    maskTextClass?: string;
+    maskAllInputs?: boolean;
+    sampling?: ReplaySamplingConfig;
   };
   vitals?: {
     enabled: boolean;
@@ -68,19 +72,19 @@ export interface ReplayStep {
   body_b64?: string;
 }
 
-export interface ReplayChunkEvent {
-  t: number;
-  type: string;
-  payload: Record<string, unknown>;
-}
-
 export interface ReplayChunk {
   replay_id: string;
   seq: number;
   started_at_ms: number;
   ended_at_ms: number;
-  events: ReplayChunkEvent[];
+  events: import("@rrweb/types").eventWithTime[];
   metadata?: Record<string, unknown>;
+}
+
+export interface ReplaySamplingConfig {
+  mousemove?: boolean | number;
+  scroll?: number;
+  input?: "all" | "last";
 }
 
 export interface HTTPRecord {

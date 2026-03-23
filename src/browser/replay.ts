@@ -1,4 +1,6 @@
-import type { HTTPRecord, ReplayChunk, ReplayChunkEvent, ReplayStep } from "../shared/types";
+import type { eventWithTime } from "@rrweb/types";
+import { EventType } from "@rrweb/types";
+import type { HTTPRecord, ReplayChunk, ReplayStep } from "../shared/types";
 import { sanitizeHeaders, stripQuery, toBase64 } from "../shared/utils";
 
 export interface ReplayBufferConfig {
@@ -11,7 +13,7 @@ export class BrowserReplayBuffer {
   private readonly cfg: ReplayBufferConfig;
   private readonly replayId: string;
   private seq = 0;
-  private events: ReplayChunkEvent[] = [];
+  private events: eventWithTime[] = [];
   private chunkStartedAt = Date.now();
 
   constructor(cfg: ReplayBufferConfig) {
@@ -23,12 +25,21 @@ export class BrowserReplayBuffer {
     return this.replayId;
   }
 
-  push(type: string, payload: Record<string, unknown>): ReplayChunk | null {
-    this.events.push({ t: Date.now(), type, payload });
+  pushRrwebEvent(event: eventWithTime): ReplayChunk | null {
+    this.events.push(event);
     if (this.currentBytes() >= this.cfg.maxChunkBytes) {
       return this.flush();
     }
     return null;
+  }
+
+  pushCustomEvent(tag: string, payload: Record<string, unknown>): ReplayChunk | null {
+    const event: eventWithTime = {
+      type: EventType.Custom,
+      data: { tag, payload },
+      timestamp: Date.now(),
+    };
+    return this.pushRrwebEvent(event);
   }
 
   flush(): ReplayChunk | null {
@@ -41,7 +52,7 @@ export class BrowserReplayBuffer {
       seq: this.seq,
       started_at_ms: this.chunkStartedAt,
       ended_at_ms: Date.now(),
-      events: this.events
+      events: this.events,
     };
 
     this.seq += 1;
@@ -61,49 +72,8 @@ export class BrowserReplayBuffer {
       method: record.method,
       url_template: stripQuery(record.url),
       headers: safeReqHeaders,
-      body_b64: body_b64 || undefined
+      body_b64: body_b64 || undefined,
     };
-  }
-
-  captureInitialDOMSnapshot(doc: Document): ReplayChunk | null {
-    const html = sanitizeDOMHTML(doc.documentElement.outerHTML);
-    return this.push("dom_snapshot", {
-      url: doc.location?.href ?? "",
-      title: doc.title ?? "",
-      viewport: {
-        w: window.innerWidth,
-        h: window.innerHeight
-      },
-      html
-    });
-  }
-
-  captureDOMMutation(event: {
-    kind: "childList" | "attributes" | "characterData";
-    targetPath: string;
-    addedHTML?: string[];
-    removedPaths?: string[];
-    attributeName?: string;
-    attributeValue?: string | null;
-    textContent?: string;
-  }): ReplayChunk | null {
-    return this.push("dom_mutation", event as unknown as Record<string, unknown>);
-  }
-
-  captureInput(event: { targetPath: string; value: string; inputType: string }): ReplayChunk | null {
-    return this.push("dom_input", {
-      targetPath: event.targetPath,
-      value: sanitizeInputValue(event.value),
-      inputType: event.inputType
-    });
-  }
-
-  captureScroll(event: { x: number; y: number; path: string }): ReplayChunk | null {
-    return this.push("dom_scroll", event as unknown as Record<string, unknown>);
-  }
-
-  captureViewport(event: { w: number; h: number }): ReplayChunk | null {
-    return this.push("dom_viewport", event as unknown as Record<string, unknown>);
   }
 
   asNetworkEvent(record: HTTPRecord): Record<string, unknown> {
@@ -115,7 +85,7 @@ export class BrowserReplayBuffer {
       req_headers: sanitizeHeaders(record.req_headers),
       res_headers: sanitizeHeaders(record.res_headers),
       req_body_b64: record.req_body_b64,
-      res_body_b64: record.res_body_b64
+      res_body_b64: record.res_body_b64,
     };
   }
 
@@ -148,23 +118,4 @@ export class BrowserReplayBuffer {
     ls.setItem(this.cfg.sessionStorageKey, next);
     return next;
   }
-}
-
-function sanitizeDOMHTML(html: string): string {
-  let out = html;
-  out = out.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "");
-  out = out.replace(/<noscript[\s\S]*?>[\s\S]*?<\/noscript>/gi, "");
-  out = out.replace(/\s(on[a-z]+)=["'][^"']*["']/gi, "");
-  out = out.replace(/(value)=["'][^"']*["']/gi, "$1=\"[redacted]\"");
-  return out;
-}
-
-function sanitizeInputValue(value: string): string {
-  if (!value) {
-    return "";
-  }
-  if (value.length > 256) {
-    return `${value.slice(0, 256)}...[truncated]`;
-  }
-  return value;
 }

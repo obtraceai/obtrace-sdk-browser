@@ -1,3 +1,4 @@
+import { record } from "rrweb";
 import { ObtraceClient } from "../core/client";
 import type { HTTPRecord, ObtraceSDKConfig, ReplayStep, SDKContext } from "../shared/types";
 import { extractPropagation, nowUnixNano, randomHex, sanitizeHeaders } from "../shared/utils";
@@ -27,23 +28,23 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
       maxChunkBytes: 480_000,
       captureNetworkRecipes: true,
       sessionStorageKey: "obtrace_session_id",
-      ...config.replay
+      ...config.replay,
     },
     vitals: {
       enabled: true,
       reportAllChanges: false,
-      ...config.vitals
+      ...config.vitals,
     },
     propagation: {
       enabled: true,
-      ...config.propagation
-    }
+      ...config.propagation,
+    },
   });
 
   const replay = new BrowserReplayBuffer({
     maxChunkBytes: config.replay?.maxChunkBytes ?? 480_000,
     flushIntervalMs: config.replay?.flushIntervalMs ?? 5000,
-    sessionStorageKey: config.replay?.sessionStorageKey ?? "obtrace_session_id"
+    sessionStorageKey: config.replay?.sessionStorageKey ?? "obtrace_session_id",
   });
 
   const recipeSteps: ReplayStep[] = [];
@@ -55,8 +56,48 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
   cleanups.push(installBrowserErrorHooks(client, replay.sessionId));
   cleanups.push(installConsoleCapture(client, replay.sessionId));
-  cleanups.push(installInteractionReplayCapture(replay, client));
-  cleanups.push(installDOMRecorder(replay, client));
+
+  if (config.replay?.enabled !== false && typeof window !== "undefined") {
+    const replayCfg = config.replay ?? { enabled: true };
+    const stopRecording = record({
+      emit(event) {
+        const chunk = replay.pushRrwebEvent(event);
+        if (chunk) {
+          client.replayChunk(chunk);
+        }
+      },
+      maskAllInputs: replayCfg.maskAllInputs ?? true,
+      maskInputOptions: {
+        password: true,
+        email: true,
+        tel: true,
+      },
+      maskInputFn: (text, element) => {
+        const el = element as HTMLInputElement;
+        const n = (el?.name || "").toLowerCase();
+        const id = (el?.id || "").toLowerCase();
+        if (/(pass|token|secret|key|email|cpf|ssn|credit|card)/.test(`${n} ${id}`)) {
+          return "[redacted]";
+        }
+        return text;
+      },
+      blockClass: replayCfg.blockClass ?? "ob-block",
+      maskTextClass: replayCfg.maskTextClass ?? "ob-mask",
+      inlineStylesheet: true,
+      collectFonts: false,
+      sampling: {
+        mousemove: replayCfg.sampling?.mousemove ?? true,
+        mouseInteraction: true,
+        scroll: replayCfg.sampling?.scroll ?? 150,
+        input: replayCfg.sampling?.input ?? "last",
+      },
+    });
+    if (stopRecording) {
+      cleanups.push(stopRecording);
+    }
+
+    cleanups.push(installNavigationTracker(replay, client));
+  }
 
   const replayTimer = setInterval(() => {
     const chunk = replay.flush();
@@ -92,7 +133,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   };
 
   const captureReplayEvent = (type: string, payload: Record<string, unknown>) => {
-    const chunk = replay.push(type, payload);
+    const chunk = replay.pushCustomEvent(type, payload);
     if (chunk) {
       client.replayChunk(chunk);
     }
@@ -130,7 +171,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
         spanId,
         traceState: incoming.traceState,
         baggage: incoming.baggage,
-        sessionId: replay.sessionId
+        sessionId: replay.sessionId,
       });
 
       const reqBody = init?.body && typeof init.body === "string" ? init.body : undefined;
@@ -146,7 +187,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
           dur_ms: duration,
           req_headers: sanitizeHeaders(headers),
           res_headers: sanitizeHeaders(response.headers),
-          req_body_b64: reqBody ? replay.encodeBody(reqBody) : undefined
+          req_body_b64: reqBody ? replay.encodeBody(reqBody) : undefined,
         };
 
         captureReplayEvent("network", replay.asNetworkEvent(netRec));
@@ -161,7 +202,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
           method,
           endpoint: requestUrl,
           statusCode: response.status,
-          attrs: { duration_ms: duration }
+          attrs: { duration_ms: duration },
         });
         client.span({
           name: `browser.fetch ${method}`,
@@ -175,8 +216,10 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
             "http.method": method,
             "http.url": requestUrl,
             "http.status_code": response.status,
-            "http.duration_ms": duration
-          }
+            "http.duration_ms": duration,
+            "replay.id": replay.sessionId,
+            "replay_id": replay.sessionId,
+          },
         });
 
         return response;
@@ -188,7 +231,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
           sessionId: replay.sessionId,
           method,
           endpoint: requestUrl,
-          attrs: { duration_ms: duration }
+          attrs: { duration_ms: duration },
         });
         client.span({
           name: `browser.fetch ${method}`,
@@ -202,14 +245,14 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
           attrs: {
             "http.method": method,
             "http.url": requestUrl,
-            "http.duration_ms": duration
-          }
+            "http.duration_ms": duration,
+          },
         });
         captureReplayEvent("network_error", {
           method,
           url: requestUrl,
           dur_ms: duration,
-          error: String(err)
+          error: String(err),
         });
         throw err;
       }
@@ -235,46 +278,22 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     flushReplay,
     captureRecipe,
     instrumentFetch,
-    shutdown
+    shutdown,
   };
 }
 
-function installInteractionReplayCapture(replay: BrowserReplayBuffer, client: ObtraceClient): () => void {
-  if (typeof window === "undefined" || typeof document === "undefined") {
+function installNavigationTracker(replay: BrowserReplayBuffer, client: ObtraceClient): () => void {
+  if (typeof window === "undefined") {
     return () => undefined;
   }
 
-  const click = (ev: MouseEvent) => {
-    const target = ev.target as HTMLElement | null;
-    const tag = target?.tagName?.toLowerCase() ?? "unknown";
-    const id = target?.id || "";
-    const cls = target?.className ? String(target.className).slice(0, 64) : "";
-    const path = window.location.pathname;
-
-    const chunk = replay.push("ui_click", {
-      x: ev.clientX,
-      y: ev.clientY,
-      tag,
-      id,
-      cls,
-      path
-    });
-    if (chunk) {
-      client.replayChunk(chunk);
-    }
-  };
-
   const nav = () => {
-    const chunk = replay.push("nav", {
+    const chunk = replay.pushCustomEvent("navigation", {
       href: window.location.href,
-      title: document.title
+      title: document.title,
     });
     if (chunk) {
       client.replayChunk(chunk);
-    }
-    const snap = replay.captureInitialDOMSnapshot(document);
-    if (snap) {
-      client.replayChunk(snap);
     }
   };
 
@@ -290,14 +309,12 @@ function installInteractionReplayCapture(replay: BrowserReplayBuffer, client: Ob
     nav();
   }) as History["replaceState"];
 
-  window.addEventListener("click", click, { passive: true });
   window.addEventListener("popstate", nav);
   window.addEventListener("hashchange", nav);
 
   return () => {
     historyRef.pushState = rawPush;
     historyRef.replaceState = rawReplace;
-    window.removeEventListener("click", click);
     window.removeEventListener("popstate", nav);
     window.removeEventListener("hashchange", nav);
   };
@@ -311,7 +328,7 @@ function installConsoleCapture(client: ObtraceClient, sessionId: string): () => 
     debug: console.debug.bind(console),
     info: console.info.bind(console),
     warn: console.warn.bind(console),
-    error: console.error.bind(console)
+    error: console.error.bind(console),
   };
   console.debug = (...args: unknown[]) => {
     client.log("debug", args.map(String).join(" "), { sessionId });
@@ -335,171 +352,4 @@ function installConsoleCapture(client: ObtraceClient, sessionId: string): () => 
     console.warn = orig.warn;
     console.error = orig.error;
   };
-}
-
-function installDOMRecorder(replay: BrowserReplayBuffer, client: ObtraceClient): () => void {
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return () => undefined;
-  }
-
-  const first = replay.captureInitialDOMSnapshot(document);
-  if (first) {
-    client.replayChunk(first);
-  }
-
-  const mutationObs = new MutationObserver((records) => {
-    for (const r of records) {
-      const targetPath = nodePath(r.target);
-      if (r.type === "childList") {
-        const addedHTML = [...r.addedNodes]
-          .slice(0, 5)
-          .map((n) => (n instanceof Element ? n.outerHTML : n.textContent ?? ""));
-        const removedPaths = [...r.removedNodes].slice(0, 5).map((n) => nodePath(n));
-        const chunk = replay.captureDOMMutation({
-          kind: "childList",
-          targetPath,
-          addedHTML,
-          removedPaths
-        });
-        if (chunk) {
-          client.replayChunk(chunk);
-        }
-      } else if (r.type === "attributes") {
-        const attr = r.attributeName ?? "";
-        if (attr.toLowerCase().startsWith("on")) {
-          continue;
-        }
-        const value = r.target instanceof Element ? r.target.getAttribute(attr) : null;
-        const chunk = replay.captureDOMMutation({
-          kind: "attributes",
-          targetPath,
-          attributeName: attr,
-          attributeValue: sanitizeMutationValue(attr, value)
-        });
-        if (chunk) {
-          client.replayChunk(chunk);
-        }
-      } else if (r.type === "characterData") {
-        const chunk = replay.captureDOMMutation({
-          kind: "characterData",
-          targetPath,
-          textContent: sanitizeMutationValue("text", r.target.textContent ?? "")
-        });
-        if (chunk) {
-          client.replayChunk(chunk);
-        }
-      }
-    }
-  });
-
-  mutationObs.observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    characterData: true,
-    attributeOldValue: false
-  });
-
-  const onInput = (ev: Event) => {
-    const target = ev.target as HTMLInputElement | HTMLTextAreaElement | null;
-    if (!target) {
-      return;
-    }
-    const type = "type" in target ? target.type : "text";
-    const val = shouldMaskInput(target) ? "[redacted]" : target.value;
-    const chunk = replay.captureInput({
-      targetPath: nodePath(target),
-      value: val,
-      inputType: type
-    });
-    if (chunk) {
-      client.replayChunk(chunk);
-    }
-  };
-
-  const onScroll = () => {
-    const chunk = replay.captureScroll({
-      x: window.scrollX,
-      y: window.scrollY,
-      path: window.location.pathname
-    });
-    if (chunk) {
-      client.replayChunk(chunk);
-    }
-  };
-
-  const onResize = () => {
-    const chunk = replay.captureViewport({
-      w: window.innerWidth,
-      h: window.innerHeight
-    });
-    if (chunk) {
-      client.replayChunk(chunk);
-    }
-  };
-
-  document.addEventListener("input", onInput, true);
-  document.addEventListener("change", onInput, true);
-  window.addEventListener("scroll", onScroll, { passive: true });
-  window.addEventListener("resize", onResize);
-
-  return () => {
-    mutationObs.disconnect();
-    document.removeEventListener("input", onInput, true);
-    document.removeEventListener("change", onInput, true);
-    window.removeEventListener("scroll", onScroll);
-    window.removeEventListener("resize", onResize);
-  };
-}
-
-function nodePath(node: Node): string {
-  const segments: string[] = [];
-  let current: Node | null = node;
-  while (current && current.parentNode) {
-    const curr = current;
-    if (curr instanceof Element) {
-      const tag = curr.tagName.toLowerCase();
-      const parent = curr.parentElement;
-      if (!parent) {
-        segments.unshift(tag);
-        break;
-      }
-      const siblings = [...parent.children].filter((c) => c.tagName === curr.tagName);
-      const idx = siblings.indexOf(curr);
-      segments.unshift(`${tag}[${idx}]`);
-    } else {
-      segments.unshift("text");
-    }
-    current = current.parentNode;
-    if (segments.length > 16) {
-      break;
-    }
-  }
-  return segments.join("/");
-}
-
-function shouldMaskInput(target: HTMLInputElement | HTMLTextAreaElement): boolean {
-  if (target instanceof HTMLInputElement) {
-    const type = (target.type || "").toLowerCase();
-    if (["password", "email", "tel", "number"].includes(type)) {
-      return true;
-    }
-  }
-  const n = (target.name || "").toLowerCase();
-  const i = (target.id || "").toLowerCase();
-  return /(pass|token|secret|key|email|cpf|ssn|credit|card)/.test(`${n} ${i}`);
-}
-
-function sanitizeMutationValue(attr: string, value: string | null): string {
-  if (!value) {
-    return "";
-  }
-  const a = attr.toLowerCase();
-  if (/(value|srcdoc|href|src)/.test(a) && value.length > 256) {
-    return `${value.slice(0, 256)}...[truncated]`;
-  }
-  if (/(token|secret|key|password|authorization|cookie)/.test(a)) {
-    return "[redacted]";
-  }
-  return value;
 }

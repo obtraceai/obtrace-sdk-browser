@@ -249,13 +249,17 @@ export class ObtraceClient {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.config.requestTimeoutMs);
     try {
+      const hdrs: Record<string, string> = {
+        Authorization: `Bearer ${this.config.apiKey}`,
+        "Content-Type": item.contentType,
+        ...this.config.defaultHeaders,
+      };
+      if (this.config.appId) hdrs["X-Obtrace-App-ID"] = this.config.appId;
+      if (this.config.env) hdrs["X-Obtrace-Env"] = this.config.env;
+      if (this.config.serviceName) hdrs["X-Obtrace-Service-Name"] = this.config.serviceName;
       const res = await fetch(`${this.config.ingestBaseUrl}${item.endpoint}`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
-          "Content-Type": item.contentType,
-          ...this.config.defaultHeaders
-        },
+        headers: hdrs,
         body: item.body,
         signal: ctrl.signal
       });
