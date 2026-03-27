@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   publish:
@@ -16,12 +15,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          registry-url: https://npm.pkg.github.com
+          registry-url: https://registry.npmjs.org
           scope: "@obtrace"
       - run: npm ci
       - run: npm run build
       - run: npm test
       - run: npm version ${GITHUB_REF_NAME#v} --no-git-tag-version
-      - run: npm publish
+      - run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
