@@ -17,6 +17,11 @@
       "import": "./dist/browser_entry.js"
     }
   },
+  "typesVersions": {
+    "*": {
+      "browser": ["./dist/types/browser_entry.d.ts"]
+    }
+  },
   "files": [
     "dist",
     "README.md"
