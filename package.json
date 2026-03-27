@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Obtrace Browser SDK with frontend wrappers",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/types/index.d.ts",
