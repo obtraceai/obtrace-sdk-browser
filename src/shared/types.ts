@@ -27,6 +27,7 @@ export interface ObtraceSDKConfig {
   requestTimeoutMs?: number;
   flushIntervalMs?: number;
   maxQueueSize?: number;
+  maxQueueBytes?: number;
   replay?: {
     enabled: boolean;
     flushIntervalMs?: number;

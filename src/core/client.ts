@@ -10,6 +10,8 @@ export class ObtraceClient {
   private active = true;
   private circuitFailures = 0;
   private circuitOpenUntil = 0;
+  private flushing = false;
+  private queueBytes = 0;
   replayTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: ObtraceSDKConfig) {
@@ -20,6 +22,7 @@ export class ObtraceClient {
       requestTimeoutMs: 5000,
       flushIntervalMs: 2000,
       maxQueueSize: 1000,
+      maxQueueBytes: 4 * 1024 * 1024,
       defaultHeaders: {},
       ...config,
       apiKey: config.apiKey,
@@ -235,58 +238,63 @@ export class ObtraceClient {
       return;
     }
     const maxQueue = this.config.maxQueueSize ?? 1000;
-    if (this.queue.length >= maxQueue) {
-      this.queue.shift();
+    const maxBytes = this.config.maxQueueBytes ?? 4 * 1024 * 1024;
+    const payloadBytes = payload.body.length * 2;
+    while (this.queue.length > 0 && (this.queue.length >= maxQueue || this.queueBytes + payloadBytes > maxBytes)) {
+      const dropped = this.queue.shift()!;
+      this.queueBytes -= dropped.body.length * 2;
     }
     this.queue.push(payload);
+    this.queueBytes += payloadBytes;
     if (this.queue.length >= 20) {
       this.flush().catch(() => undefined);
     }
   }
 
   async flush(): Promise<void> {
-    if (!this.queue.length) {
+    if (this.flushing || !this.queue.length) {
       return;
     }
     const now = Date.now();
     if (now < this.circuitOpenUntil) {
       return;
     }
-    const halfOpen = this.circuitFailures >= 5;
-    const batch = halfOpen ? this.queue.splice(0, 1) : this.queue.splice(0, this.queue.length);
-    for (const item of batch) {
+    this.flushing = true;
+    try {
+      const halfOpen = this.circuitFailures >= 5;
+      const batch = halfOpen ? this.queue.splice(0, 1) : this.queue.splice(0, this.queue.length);
+      for (const item of batch) {
+        this.queueBytes -= item.body.length * 2;
+      }
+      const concurrency = 4;
+      for (let i = 0; i < batch.length; i += concurrency) {
+        const chunk = batch.slice(i, i + concurrency);
+        await Promise.allSettled(chunk.map((item) => this.sendWithRetry(item)));
+      }
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  private async sendWithRetry(item: QueuedPayload): Promise<void> {
+    try {
+      await this.send(item);
+      if (this.circuitFailures > 0) {
+        this.circuitFailures = 0;
+        this.circuitOpenUntil = 0;
+      }
+    } catch {
       try {
+        await new Promise((r) => setTimeout(r, 500));
         await this.send(item);
         if (this.circuitFailures > 0) {
-          if (this.config.debug) {
-            console.warn("[obtrace-sdk] circuit breaker closed");
-          }
           this.circuitFailures = 0;
           this.circuitOpenUntil = 0;
         }
       } catch {
-        try {
-          await new Promise((r) => setTimeout(r, 500));
-          await this.send(item);
-          if (this.circuitFailures > 0) {
-            if (this.config.debug) {
-              console.warn("[obtrace-sdk] circuit breaker closed");
-            }
-            this.circuitFailures = 0;
-            this.circuitOpenUntil = 0;
-          }
-        } catch (retryErr) {
-          this.circuitFailures++;
-          if (this.circuitFailures >= 5) {
-            this.circuitOpenUntil = Date.now() + 30000;
-            if (this.config.debug) {
-              console.warn("[obtrace-sdk] circuit breaker opened");
-            }
-          }
-          if (this.config.debug) {
-            // eslint-disable-next-line no-console
-            console.error("[obtrace-sdk] send failed after retry", retryErr);
-          }
+        this.circuitFailures++;
+        if (this.circuitFailures >= 5) {
+          this.circuitOpenUntil = Date.now() + 30000;
         }
       }
     }
