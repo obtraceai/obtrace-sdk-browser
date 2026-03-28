@@ -1,6 +1,6 @@
 import { trace, metrics, type Tracer, type Meter } from "@opentelemetry/api";
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-web";
+import { BatchSpanProcessor, TraceIdRatioBasedSampler, ParentBasedSampler } from "@opentelemetry/sdk-trace-web";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
@@ -46,9 +46,15 @@ export function setupOtelWeb(config: ObtraceSDKConfig): OtelHandles {
     headers: authHeaders,
   });
 
+  const sampleRate = config.tracesSampleRate ?? 1;
+  const sampler = sampleRate < 1
+    ? new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(sampleRate) })
+    : undefined;
+
   const tracerProvider = new WebTracerProvider({
     resource,
     spanProcessors: [new BatchSpanProcessor(traceExporter)],
+    ...(sampler ? { sampler } : {}),
   });
 
   tracerProvider.register({

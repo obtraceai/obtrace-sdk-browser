@@ -1,4 +1,5 @@
 import type { Meter } from "@opentelemetry/api";
+import { getElementSelector } from "./breadcrumbs";
 
 export function installWebVitals(meter: Meter, reportAllChanges: boolean): () => void {
   if (typeof window === "undefined" || typeof PerformanceObserver === "undefined") {
@@ -18,9 +19,7 @@ export function installWebVitals(meter: Meter, reportAllChanges: boolean): () =>
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
           cb(entry);
-          if (!reportAllChanges) {
-            break;
-          }
+          if (!reportAllChanges) break;
         }
       });
       observer.observe({ type, buffered: true });
@@ -37,21 +36,40 @@ export function installWebVitals(meter: Meter, reportAllChanges: boolean): () =>
   });
 
   observe("largest-contentful-paint", (entry) => {
-    lcpGauge.record(entry.startTime, { vital: "lcp" });
+    const lcp = entry as PerformanceEntry & { element?: Element };
+    const attrs: Record<string, string | number> = { vital: "lcp" };
+    if (lcp.element) {
+      attrs["lcp.element"] = getElementSelector(lcp.element);
+    }
+    lcpGauge.record(entry.startTime, attrs);
   });
 
   observe("layout-shift", (entry) => {
-    const ls = entry as PerformanceEntry & { value?: number; hadRecentInput?: boolean };
-    if (ls.hadRecentInput) {
-      return;
+    const ls = entry as PerformanceEntry & { value?: number; hadRecentInput?: boolean; sources?: Array<{ node?: Element }> };
+    if (ls.hadRecentInput) return;
+    const attrs: Record<string, string | number> = { vital: "cls" };
+    if (ls.sources && ls.sources.length > 0 && ls.sources[0].node) {
+      attrs["cls.element"] = getElementSelector(ls.sources[0].node);
     }
-    clsGauge.record(ls.value ?? 0, { vital: "cls" });
+    clsGauge.record(ls.value ?? 0, attrs);
   });
 
+  const interactionDurations = new Map<number, number>();
+
   observe("event", (entry) => {
-    const ev = entry as PerformanceEntry & { duration?: number; name?: string };
-    if (ev.duration && ev.duration > 0) {
-      inpGauge.record(ev.duration, { vital: "inp", event: ev.name ?? "event" });
+    const ev = entry as PerformanceEntry & { duration?: number; interactionId?: number };
+    if (!ev.interactionId || ev.interactionId === 0) return;
+    if (!ev.duration || ev.duration <= 0) return;
+
+    const existing = interactionDurations.get(ev.interactionId) ?? 0;
+    if (ev.duration > existing) {
+      interactionDurations.set(ev.interactionId, ev.duration);
+    }
+
+    if (interactionDurations.size > 50) {
+      const sorted = [...interactionDurations.values()].sort((a, b) => b - a);
+      const p98Index = Math.max(0, Math.ceil(sorted.length * 0.02) - 1);
+      inpGauge.record(sorted[p98Index], { vital: "inp" });
     }
   });
 
@@ -61,8 +79,11 @@ export function installWebVitals(meter: Meter, reportAllChanges: boolean): () =>
   }
 
   return () => {
-    for (const c of cleanups) {
-      c();
+    if (interactionDurations.size > 0) {
+      const sorted = [...interactionDurations.values()].sort((a, b) => b - a);
+      const p98Index = Math.max(0, Math.ceil(sorted.length * 0.02) - 1);
+      inpGauge.record(sorted[p98Index], { vital: "inp" });
     }
+    for (const c of cleanups) c();
   };
 }

@@ -53,6 +53,9 @@ export interface ObtraceSDKConfig {
   instrumentGlobalFetch?: boolean;
   instrumentXHR?: boolean;
   patchConsole?: boolean;
+  captureConsole?: boolean;
+  tracesSampleRate?: number;
+  replaySampleRate?: number;
 }
 
 export interface SDKContext {
