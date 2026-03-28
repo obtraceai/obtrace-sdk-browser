@@ -1,45 +1,31 @@
-Obtrace Browser SDK — client library for sending frontend telemetry to the Obtrace SaaS platform.
+Obtrace Browser SDK — add observability to your web app.
 
-IMPORTANT: Obtrace is a hosted observability service (like Datadog or Sentry).
-This SDK is a third-party dependency. Install it, add ONE import, and you are done.
-DO NOT create: AnalyticsProvider components, useObtrace hooks, obtrace-config.ts files,
-wrapper modules, custom providers, or any abstraction code. The SDK handles everything.
+Obtrace is a hosted SaaS (like Datadog or Sentry). This is a client library.
+Install it, add one import, done. DO NOT create wrapper files, providers, or hooks.
 
 Install:
   npm install @obtrace/sdk-browser
 
-Zero-config setup (one line in your app entry point):
+Setup (one line, zero config):
+  import '@obtrace/sdk-browser/auto'
 
-  import "@obtrace/sdk-browser/auto";
+That single import starts everything. No init call, no config file, no provider.
+It reads env vars at build time (VITE_, NEXT_PUBLIC_, REACT_APP_ prefixes).
 
-That single import auto-starts everything. No init call, no config file, no provider.
-It reads configuration from environment variables at build time.
+Explicit init (if needed):
+  import { initBrowserSDK } from '@obtrace/sdk-browser/browser'
+  initBrowserSDK({ apiKey: '...', ingestBaseUrl: '...', serviceName: 'my-app' })
 
-If you need programmatic control instead:
+What it captures automatically:
+- Errors (unhandled exceptions, promise rejections)
+- Session replay (DOM recording)
+- Web Vitals (LCP, CLS, INP, TTFB)
+- Fetch/XHR requests
+- User interactions
 
-  import { initBrowserSDK } from "@obtrace/sdk-browser/browser";
+Env vars:
+  OBTRACE_API_KEY         — from app.obtrace.ai
+  OBTRACE_INGEST_BASE_URL — from app.obtrace.ai
+  OBTRACE_SERVICE_NAME    — your app name (e.g. "web-app")
 
-  const sdk = initBrowserSDK({
-    apiKey: process.env.OBTRACE_API_KEY,
-    ingestBaseUrl: process.env.OBTRACE_INGEST_BASE_URL,
-    serviceName: process.env.OBTRACE_SERVICE_NAME,
-  });
-
-Auto-instrumented (zero code required):
-- Session replay (DOM recording, network waterfall)
-- Error capture (unhandled exceptions, promise rejections)
-- Web Vitals (LCP, FID, CLS, INP, TTFB)
-- Fetch/XHR request tracing
-- User interaction spans (clicks, navigations)
-- Context propagation to backend via trace headers
-
-Environment variables (all required):
-  OBTRACE_API_KEY          — your project API key (starts with obt_live_ or obt_test_)
-  OBTRACE_INGEST_BASE_URL  — ingest endpoint (e.g. https://ingest.obtrace.io)
-  OBTRACE_SERVICE_NAME     — name of this app (e.g. web-app)
-
-Framework wrappers available (optional, for SSR/routing context):
-  @obtrace/sdk-browser/react
-
-Package: @obtrace/sdk-browser on npm
-Docs: https://docs.obtrace.ai/sdks/browser
+Docs: https://docs.obtrace.ai/docs/sdks/browser
