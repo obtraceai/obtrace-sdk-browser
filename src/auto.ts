@@ -44,10 +44,7 @@ function autoInit() {
   const config = detectConfig();
   if (!config) return;
 
-  const originalFetch = window.fetch.bind(window);
   _sdk = initBrowserSDK(config);
-  void originalFetch;
-  window.fetch = _sdk.instrumentFetch();
 }
 
 autoInit();

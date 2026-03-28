@@ -51,6 +51,8 @@ export interface ObtraceSDKConfig {
   validateSemanticMetrics?: boolean;
   debug?: boolean;
   instrumentGlobalFetch?: boolean;
+  instrumentXHR?: boolean;
+  patchConsole?: boolean;
 }
 
 export interface SDKContext {

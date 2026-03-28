@@ -41,6 +41,10 @@ let originalConsole: {
   error: typeof console.error;
 } | null = null;
 
+let xhrPatched = false;
+let originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
+let originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
+
 let navigationPatched = false;
 let originalPushState: History["pushState"] | null = null;
 let originalReplaceState: History["replaceState"] | null = null;
@@ -235,6 +239,141 @@ function teardownSharedRrwebRecording(): void {
   rrwebRecording = false;
 }
 
+function installSharedXHRInstrumentation(): void {
+  if (xhrPatched || typeof window === "undefined" || typeof XMLHttpRequest === "undefined") {
+    return;
+  }
+  xhrPatched = true;
+
+  originalXhrOpen = XMLHttpRequest.prototype.open;
+  originalXhrSend = XMLHttpRequest.prototype.send;
+
+  const rawOpen = originalXhrOpen;
+  const rawSend = originalXhrSend;
+
+  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+    (this as unknown as Record<string, unknown>).__ob_method = String(method).toUpperCase();
+    (this as unknown as Record<string, unknown>).__ob_url = String(url);
+    return rawOpen.apply(this, [method, url, ...rest] as unknown as Parameters<typeof rawOpen>);
+  } as typeof XMLHttpRequest.prototype.open;
+
+  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
+    const method = ((this as unknown as Record<string, unknown>).__ob_method as string) || "GET";
+    const requestUrl = ((this as unknown as Record<string, unknown>).__ob_url as string) || "";
+    const startedMs = Date.now();
+    const startedNs = nowUnixNano();
+    const traceId = randomHex(16);
+    const spanId = randomHex(8);
+
+    try {
+      this.setRequestHeader("traceparent", `00-${traceId}-${spanId}-01`);
+    } catch {}
+
+    const onDone = () => {
+      const duration = Date.now() - startedMs;
+      const status = this.status;
+
+      for (const entry of instances) {
+        entry.client.log("info", `xhr ${method} ${requestUrl} -> ${status}`, {
+          traceId,
+          spanId,
+          sessionId: entry.sessionId,
+          method,
+          endpoint: requestUrl,
+          statusCode: status,
+          attrs: { duration_ms: duration },
+        });
+
+        entry.client.span({
+          name: `browser.xhr ${method}`,
+          traceId,
+          spanId,
+          startUnixNano: startedNs,
+          endUnixNano: nowUnixNano(),
+          statusCode: status,
+          attrs: {
+            "http.method": method,
+            "http.url": requestUrl,
+            "http.status_code": status,
+            "http.duration_ms": duration,
+            "replay.id": entry.sessionId,
+            "replay_id": entry.sessionId,
+          },
+        });
+
+        const netRec: HTTPRecord = {
+          ts: Date.now(),
+          method,
+          url: requestUrl,
+          status,
+          dur_ms: duration,
+        };
+        const chunk = entry.replay.pushCustomEvent("network", entry.replay.asNetworkEvent(netRec));
+        if (chunk) {
+          entry.client.replayChunk(chunk);
+        }
+      }
+    };
+
+    this.addEventListener("load", onDone);
+    this.addEventListener("error", () => {
+      const duration = Date.now() - startedMs;
+      for (const entry of instances) {
+        entry.client.log("error", `xhr ${method} ${requestUrl} failed`, {
+          traceId,
+          spanId,
+          sessionId: entry.sessionId,
+          method,
+          endpoint: requestUrl,
+          attrs: { duration_ms: duration },
+        });
+
+        entry.client.span({
+          name: `browser.xhr ${method}`,
+          traceId,
+          spanId,
+          startUnixNano: startedNs,
+          endUnixNano: nowUnixNano(),
+          statusCode: 0,
+          statusMessage: "network error",
+          attrs: {
+            "http.method": method,
+            "http.url": requestUrl,
+            "http.duration_ms": duration,
+          },
+        });
+
+        const chunk = entry.replay.pushCustomEvent("network_error", {
+          method,
+          url: requestUrl,
+          dur_ms: duration,
+          error: "network error",
+        });
+        if (chunk) {
+          entry.client.replayChunk(chunk);
+        }
+      }
+    });
+
+    return rawSend.call(this, body);
+  };
+}
+
+function teardownSharedXHRInstrumentation(): void {
+  if (!xhrPatched || typeof XMLHttpRequest === "undefined") {
+    return;
+  }
+  if (originalXhrOpen) {
+    XMLHttpRequest.prototype.open = originalXhrOpen;
+  }
+  if (originalXhrSend) {
+    XMLHttpRequest.prototype.send = originalXhrSend;
+  }
+  originalXhrOpen = null;
+  originalXhrSend = null;
+  xhrPatched = false;
+}
+
 export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const client = new ObtraceClient({
     ...config,
@@ -283,7 +422,9 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
   cleanups.push(installBrowserErrorHooks(client, replay.sessionId));
 
-  installSharedConsoleCapture();
+  if (config.patchConsole !== false) {
+    installSharedConsoleCapture();
+  }
 
   if (config.replay?.enabled !== false && typeof window !== "undefined") {
     installSharedRrwebRecording(config);
@@ -367,6 +508,8 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     }
   };
 
+  const savedFetch = typeof window !== "undefined" ? window.fetch.bind(window) : globalThis.fetch;
+
   const instrumentFetch = () => {
     return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const method = (init?.method ?? "GET").toUpperCase();
@@ -388,7 +531,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
       const reqBody = init?.body && typeof init.body === "string" ? init.body : undefined;
       try {
-        const response = await fetch(input, { ...init, headers });
+        const response = await savedFetch(input, { ...init, headers });
         const duration = Date.now() - startedMs;
 
         const netRec: HTTPRecord = {
@@ -485,6 +628,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
       teardownSharedConsoleCapture();
       teardownSharedNavigationTracker();
       teardownSharedRrwebRecording();
+      teardownSharedXHRInstrumentation();
     }
 
     await client.shutdown();
@@ -506,6 +650,10 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
   if (config.instrumentGlobalFetch !== false && typeof window !== "undefined") {
     window.fetch = instrumentFetch();
+  }
+
+  if (config.instrumentXHR !== false && typeof window !== "undefined") {
+    installSharedXHRInstrumentation();
   }
 
   return sdk;
