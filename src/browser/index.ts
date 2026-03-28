@@ -239,20 +239,30 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     installSharedNavigationTracker();
   }
 
+  let pendingBeaconBlob: Blob | null = null;
+
   client.replayTimer = setInterval(() => {
     const chunk = replay.flush();
     if (chunk) {
+      const json = JSON.stringify(chunk);
+      pendingBeaconBlob = new Blob([json], { type: "application/json" });
       client.replayChunk(chunk);
+    } else {
+      pendingBeaconBlob = null;
     }
   }, config.replay?.flushIntervalMs ?? 5000);
   const replayTimer = client.replayTimer;
 
   const sendViaBeacon = () => {
-    const chunk = replay.flush();
-    if (chunk) {
-      const url = `${config.ingestBaseUrl?.replace(/\/$/, "")}/ingest/replay/chunk`;
-      const blob = new Blob([JSON.stringify(chunk)], { type: "application/json" });
+    const url = `${config.ingestBaseUrl?.replace(/\/$/, "")}/ingest/replay/chunk`;
+    const freshChunk = replay.flush();
+    if (freshChunk) {
+      const blob = new Blob([JSON.stringify(freshChunk)], { type: "application/json" });
       navigator.sendBeacon(url, blob);
+      pendingBeaconBlob = null;
+    } else if (pendingBeaconBlob) {
+      navigator.sendBeacon(url, pendingBeaconBlob);
+      pendingBeaconBlob = null;
     }
   };
 

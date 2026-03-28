@@ -3,6 +3,36 @@ import { EventType } from "@rrweb/types";
 import type { HTTPRecord, ReplayChunk, ReplayStep } from "../shared/types";
 import { sanitizeHeaders, stripQuery, toBase64 } from "../shared/utils";
 
+const KEY_OVERHEAD = 6;
+
+function estimateObjectBytes(value: unknown): number {
+  if (value === null || value === undefined) return 4;
+  switch (typeof value) {
+    case "string":
+      return (value as string).length + 2;
+    case "number":
+    case "boolean":
+      return 8;
+    case "object": {
+      if (Array.isArray(value)) {
+        let sum = 2;
+        for (let i = 0; i < value.length; i++) {
+          sum += estimateObjectBytes(value[i]) + 1;
+        }
+        return sum;
+      }
+      let sum = 2;
+      const keys = Object.keys(value as Record<string, unknown>);
+      for (let i = 0; i < keys.length; i++) {
+        sum += keys[i].length + KEY_OVERHEAD + estimateObjectBytes((value as Record<string, unknown>)[keys[i]]);
+      }
+      return sum;
+    }
+    default:
+      return 4;
+  }
+}
+
 export interface ReplayBufferConfig {
   maxChunkBytes: number;
   flushIntervalMs: number;
@@ -28,7 +58,7 @@ export class BrowserReplayBuffer {
 
   pushRrwebEvent(event: eventWithTime): ReplayChunk | null {
     this.events.push(event);
-    this.bytesEstimate += JSON.stringify(event).length + 1;
+    this.bytesEstimate += estimateObjectBytes(event);
     if (this.bytesEstimate >= this.cfg.maxChunkBytes) {
       return this.flush();
     }

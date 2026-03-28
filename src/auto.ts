@@ -129,7 +129,13 @@ function setupDeferredInit(): void {
   });
 
   const head = document.head || document.documentElement;
-  _observer.observe(head, { childList: true, subtree: true });
+  _observer.observe(head, { childList: true });
+
+  setTimeout(() => {
+    if (!_sdk) {
+      teardownObserver();
+    }
+  }, 5000);
 }
 
 function autoInit() {
