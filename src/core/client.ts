@@ -1,4 +1,5 @@
 import type { ObtraceSDKConfig, ReplayChunk, ReplayStep } from "../shared/types";
+import { enqueueOffline } from "../browser/offline";
 
 export class ObtraceClient {
   private readonly config: Required<Pick<ObtraceSDKConfig, "apiKey" | "ingestBaseUrl" | "serviceName">> & ObtraceSDKConfig;
@@ -70,13 +71,19 @@ export class ObtraceClient {
     if (this.config.appId) hdrs["X-Obtrace-App-ID"] = this.config.appId;
     if (this.config.env) hdrs["X-Obtrace-Env"] = this.config.env;
     if (this.config.serviceName) hdrs["X-Obtrace-Service-Name"] = this.config.serviceName;
-    fetch(`${this.config.ingestBaseUrl}${endpoint}`, {
+    const url = `${this.config.ingestBaseUrl}${endpoint}`;
+    fetch(url, {
       method: "POST",
       headers: hdrs,
       body,
       signal: ctrl.signal,
     })
-      .catch(() => {})
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`);
+      })
+      .catch(() => {
+        enqueueOffline(url, body, hdrs).catch(() => {});
+      })
       .finally(() => clearTimeout(t));
   }
 }

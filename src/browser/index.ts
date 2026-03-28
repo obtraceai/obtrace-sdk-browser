@@ -13,6 +13,7 @@ import { installClickTracking } from "./clicks";
 import { installResourceTiming } from "./resources";
 import { installLongTaskDetection } from "./longtasks";
 import { installMemoryTracking } from "./memory";
+import { installOfflineSupport } from "./offline";
 
 export type UserContext = { id?: string; email?: string; name?: string; [key: string]: unknown };
 
@@ -230,6 +231,8 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   if (config.captureConsole !== false) {
     cleanups.push(installConsoleCapture(tracer, replay.sessionId));
   }
+
+  cleanups.push(installOfflineSupport());
 
   if (shouldReplay && config.replay?.enabled !== false && typeof window !== "undefined") {
     installSharedRrwebRecording(config);
