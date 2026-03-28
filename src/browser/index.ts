@@ -29,6 +29,7 @@ interface InstanceEntry {
   config: ObtraceSDKConfig;
   recipeSteps: ReplayStep[];
   otel: OtelHandles;
+  sdk?: BrowserSDK;
 }
 
 const instances = new Set<InstanceEntry>();
@@ -182,6 +183,16 @@ function severityToNumber(level: string): number {
 }
 
 export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
+  for (const entry of instances) {
+    if (
+      entry.config.apiKey === config.apiKey &&
+      entry.config.ingestBaseUrl === config.ingestBaseUrl &&
+      entry.config.serviceName === config.serviceName
+    ) {
+      return entry.sdk!;
+    }
+  }
+
   const otel = setupOtelWeb(config);
   const tracer = otel.tracer;
   const meter = otel.meter;
@@ -251,7 +262,6 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
       pendingBeaconBlob = null;
     }
   }, config.replay?.flushIntervalMs ?? 5000);
-  const replayTimer = client.replayTimer;
 
   const sendViaBeacon = () => {
     const url = `${config.ingestBaseUrl?.replace(/\/$/, "")}/ingest/replay/chunk`;
@@ -357,7 +367,13 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   };
 
   const shutdown = async () => {
-    clearInterval(replayTimer);
+    if (client.replayTimer) {
+      clearInterval(client.replayTimer);
+      client.replayTimer = null;
+    }
+
+    await otel.shutdown();
+
     try { flushReplay(); } catch {}
     for (const c of cleanups) {
       try { c(); } catch {}
@@ -371,7 +387,6 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
       teardownSharedRrwebRecording();
     }
 
-    await otel.shutdown();
     await client.shutdown();
   };
 
@@ -388,6 +403,8 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     instrumentFetch,
     shutdown,
   };
+
+  entry.sdk = sdk;
 
   return sdk;
 }
