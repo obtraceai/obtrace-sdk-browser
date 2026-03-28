@@ -1,7 +1,9 @@
 import { record } from "rrweb";
+import { SpanStatusCode } from "@opentelemetry/api";
+import type { Tracer, Meter } from "@opentelemetry/api";
 import { ObtraceClient } from "../core/client";
-import type { HTTPRecord, ObtraceSDKConfig, ReplayStep, SDKContext } from "../shared/types";
-import { extractPropagation, nowUnixNano, randomHex, sanitizeHeaders } from "../shared/utils";
+import { setupOtelWeb, type OtelHandles } from "../core/otel-web-setup";
+import type { ObtraceSDKConfig, ReplayStep, SDKContext } from "../shared/types";
 import { installBrowserErrorHooks } from "./errors";
 import { BrowserReplayBuffer } from "./replay";
 import { installWebVitals } from "./vitals";
@@ -26,24 +28,11 @@ interface InstanceEntry {
   replay: BrowserReplayBuffer;
   config: ObtraceSDKConfig;
   recipeSteps: ReplayStep[];
+  otel: OtelHandles;
 }
 
 const instances = new Set<InstanceEntry>();
-
-let activeTraceContext: { traceId: string; spanId: string } | null = null;
 const replayBuffers = new Set<BrowserReplayBuffer>();
-
-let consolePatched = false;
-let originalConsole: {
-  debug: typeof console.debug;
-  info: typeof console.info;
-  warn: typeof console.warn;
-  error: typeof console.error;
-} | null = null;
-
-let xhrPatched = false;
-let originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
-let originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
 
 let navigationPatched = false;
 let originalPushState: History["pushState"] | null = null;
@@ -53,64 +42,6 @@ let navigationHashchangeHandler: (() => void) | null = null;
 
 let rrwebRecording = false;
 let stopRrwebRecording: (() => void) | null = null;
-
-function installSharedConsoleCapture(): void {
-  if (consolePatched || typeof window === "undefined") {
-    return;
-  }
-  consolePatched = true;
-  originalConsole = {
-    debug: console.debug.bind(console),
-    info: console.info.bind(console),
-    warn: console.warn.bind(console),
-    error: console.error.bind(console),
-  };
-  const orig = originalConsole;
-  console.debug = (...args: unknown[]) => {
-    const msg = args.map(String).join(" ");
-    const trace = activeTraceContext;
-    for (const entry of instances) {
-      entry.client.log("debug", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
-    }
-    orig.debug(...args);
-  };
-  console.info = (...args: unknown[]) => {
-    const msg = args.map(String).join(" ");
-    const trace = activeTraceContext;
-    for (const entry of instances) {
-      entry.client.log("info", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
-    }
-    orig.info(...args);
-  };
-  console.warn = (...args: unknown[]) => {
-    const msg = args.map(String).join(" ");
-    const trace = activeTraceContext;
-    for (const entry of instances) {
-      entry.client.log("warn", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
-    }
-    orig.warn(...args);
-  };
-  console.error = (...args: unknown[]) => {
-    const msg = args.map(String).join(" ");
-    const trace = activeTraceContext;
-    for (const entry of instances) {
-      entry.client.log("error", msg, { sessionId: entry.sessionId, traceId: trace?.traceId, spanId: trace?.spanId });
-    }
-    orig.error(...args);
-  };
-}
-
-function teardownSharedConsoleCapture(): void {
-  if (!consolePatched || !originalConsole) {
-    return;
-  }
-  console.debug = originalConsole.debug;
-  console.info = originalConsole.info;
-  console.warn = originalConsole.warn;
-  console.error = originalConsole.error;
-  originalConsole = null;
-  consolePatched = false;
-}
 
 function fanOutNavigation(): void {
   for (const entry of instances) {
@@ -239,142 +170,22 @@ function teardownSharedRrwebRecording(): void {
   rrwebRecording = false;
 }
 
-function installSharedXHRInstrumentation(): void {
-  if (xhrPatched || typeof window === "undefined" || typeof XMLHttpRequest === "undefined") {
-    return;
+function severityToNumber(level: string): number {
+  switch (level) {
+    case "debug": return 5;
+    case "info": return 9;
+    case "warn": return 13;
+    case "error": return 17;
+    case "fatal": return 21;
+    default: return 9;
   }
-  xhrPatched = true;
-
-  originalXhrOpen = XMLHttpRequest.prototype.open;
-  originalXhrSend = XMLHttpRequest.prototype.send;
-
-  const rawOpen = originalXhrOpen;
-  const rawSend = originalXhrSend;
-
-  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    (this as unknown as Record<string, unknown>).__ob_method = String(method).toUpperCase();
-    (this as unknown as Record<string, unknown>).__ob_url = String(url);
-    return rawOpen.apply(this, [method, url, ...rest] as unknown as Parameters<typeof rawOpen>);
-  } as typeof XMLHttpRequest.prototype.open;
-
-  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
-    const method = ((this as unknown as Record<string, unknown>).__ob_method as string) || "GET";
-    const requestUrl = ((this as unknown as Record<string, unknown>).__ob_url as string) || "";
-    const startedMs = Date.now();
-    const startedNs = nowUnixNano();
-    const traceId = randomHex(16);
-    const spanId = randomHex(8);
-
-    try {
-      this.setRequestHeader("traceparent", `00-${traceId}-${spanId}-01`);
-    } catch {}
-
-    const onDone = () => {
-      const duration = Date.now() - startedMs;
-      const status = this.status;
-
-      for (const entry of instances) {
-        entry.client.log("info", `xhr ${method} ${requestUrl} -> ${status}`, {
-          traceId,
-          spanId,
-          sessionId: entry.sessionId,
-          method,
-          endpoint: requestUrl,
-          statusCode: status,
-          attrs: { duration_ms: duration },
-        });
-
-        entry.client.span({
-          name: `browser.xhr ${method}`,
-          traceId,
-          spanId,
-          startUnixNano: startedNs,
-          endUnixNano: nowUnixNano(),
-          statusCode: status,
-          attrs: {
-            "http.method": method,
-            "http.url": requestUrl,
-            "http.status_code": status,
-            "http.duration_ms": duration,
-            "replay.id": entry.sessionId,
-            "replay_id": entry.sessionId,
-          },
-        });
-
-        const netRec: HTTPRecord = {
-          ts: Date.now(),
-          method,
-          url: requestUrl,
-          status,
-          dur_ms: duration,
-        };
-        const chunk = entry.replay.pushCustomEvent("network", entry.replay.asNetworkEvent(netRec));
-        if (chunk) {
-          entry.client.replayChunk(chunk);
-        }
-      }
-    };
-
-    this.addEventListener("load", onDone);
-    this.addEventListener("error", () => {
-      const duration = Date.now() - startedMs;
-      for (const entry of instances) {
-        entry.client.log("error", `xhr ${method} ${requestUrl} failed`, {
-          traceId,
-          spanId,
-          sessionId: entry.sessionId,
-          method,
-          endpoint: requestUrl,
-          attrs: { duration_ms: duration },
-        });
-
-        entry.client.span({
-          name: `browser.xhr ${method}`,
-          traceId,
-          spanId,
-          startUnixNano: startedNs,
-          endUnixNano: nowUnixNano(),
-          statusCode: 0,
-          statusMessage: "network error",
-          attrs: {
-            "http.method": method,
-            "http.url": requestUrl,
-            "http.duration_ms": duration,
-          },
-        });
-
-        const chunk = entry.replay.pushCustomEvent("network_error", {
-          method,
-          url: requestUrl,
-          dur_ms: duration,
-          error: "network error",
-        });
-        if (chunk) {
-          entry.client.replayChunk(chunk);
-        }
-      }
-    });
-
-    return rawSend.call(this, body);
-  };
-}
-
-function teardownSharedXHRInstrumentation(): void {
-  if (!xhrPatched || typeof XMLHttpRequest === "undefined") {
-    return;
-  }
-  if (originalXhrOpen) {
-    XMLHttpRequest.prototype.open = originalXhrOpen;
-  }
-  if (originalXhrSend) {
-    XMLHttpRequest.prototype.send = originalXhrSend;
-  }
-  originalXhrOpen = null;
-  originalXhrSend = null;
-  xhrPatched = false;
 }
 
 export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
+  const otel = setupOtelWeb(config);
+  const tracer = otel.tracer;
+  const meter = otel.meter;
+
   const client = new ObtraceClient({
     ...config,
     replay: {
@@ -411,20 +222,17 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     replay,
     config,
     recipeSteps,
+    otel,
   };
 
   instances.add(entry);
   replayBuffers.add(replay);
 
   if (config.vitals?.enabled !== false) {
-    cleanups.push(installWebVitals(client, !!config.vitals?.reportAllChanges));
+    cleanups.push(installWebVitals(meter, !!config.vitals?.reportAllChanges));
   }
 
-  cleanups.push(installBrowserErrorHooks(client, replay.sessionId));
-
-  if (config.patchConsole !== false) {
-    installSharedConsoleCapture();
-  }
+  cleanups.push(installBrowserErrorHooks(tracer, replay.sessionId));
 
   if (config.replay?.enabled !== false && typeof window !== "undefined") {
     installSharedRrwebRecording(config);
@@ -438,6 +246,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     }
   }, config.replay?.flushIntervalMs ?? 5000);
   const replayTimer = client.replayTimer;
+
   const sendViaBeacon = () => {
     const chunk = replay.flush();
     if (chunk) {
@@ -446,16 +255,17 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
       navigator.sendBeacon(url, blob);
     }
   };
+
   const onVisibility = () => {
     if (document.visibilityState === "hidden") {
       flushReplay();
-      client.flush().catch(() => {});
     }
   };
+
   const onBeforeUnload = () => {
     sendViaBeacon();
-    client.flush().catch(() => {});
   };
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility);
     cleanups.push(() => document.removeEventListener("visibilitychange", onVisibility));
@@ -466,22 +276,44 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   }
 
   const log = (level: "debug" | "info" | "warn" | "error" | "fatal", message: string, context?: SDKContext) => {
-    const ctx: SDKContext = { ...context, sessionId: replay.sessionId };
-    if (!ctx.traceId && activeTraceContext) {
-      ctx.traceId = activeTraceContext.traceId;
-      ctx.spanId = activeTraceContext.spanId;
+    const span = tracer.startSpan("browser.log", {
+      attributes: {
+        "log.severity": level.toUpperCase(),
+        "log.severity_number": severityToNumber(level),
+        "log.message": message,
+        "session.id": replay.sessionId,
+        ...(context?.traceId ? { "obtrace.trace_id": context.traceId } : {}),
+        ...(context?.spanId ? { "obtrace.span_id": context.spanId } : {}),
+        ...context?.attrs,
+      },
+    });
+    if (level === "error" || level === "fatal") {
+      span.setStatus({ code: SpanStatusCode.ERROR, message });
     }
-    client.log(level, message, ctx);
+    span.end();
+  };
+
+  const metricFn = (name: string, value: number, unit?: string, context?: SDKContext) => {
+    const gauge = meter.createGauge(name, { unit: unit ?? "1" });
+    gauge.record(value, context?.attrs as Record<string, string | number> | undefined);
   };
 
   const captureException = (error: unknown, context?: SDKContext) => {
     const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    const ctx: SDKContext = { ...context, sessionId: replay.sessionId };
-    if (!ctx.traceId && activeTraceContext) {
-      ctx.traceId = activeTraceContext.traceId;
-      ctx.spanId = activeTraceContext.spanId;
+    const span = tracer.startSpan("browser.exception", {
+      attributes: {
+        "error.message": msg,
+        "session.id": replay.sessionId,
+        ...(context?.traceId ? { "obtrace.trace_id": context.traceId } : {}),
+        ...(context?.spanId ? { "obtrace.span_id": context.spanId } : {}),
+        ...context?.attrs,
+      },
+    });
+    span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
+    if (error instanceof Error) {
+      span.recordException(error);
     }
-    client.log("error", msg, ctx);
+    span.end();
   };
 
   const captureReplayEvent = (type: string, payload: Record<string, unknown>) => {
@@ -508,109 +340,9 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     }
   };
 
-  const savedFetch = typeof window !== "undefined" ? window.fetch.bind(window) : globalThis.fetch;
-
   const instrumentFetch = () => {
-    return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      const method = (init?.method ?? "GET").toUpperCase();
-      const startedMs = Date.now();
-      const startedNs = nowUnixNano();
-      const requestUrl = typeof input === "string" ? input : input.toString();
-      const incoming = extractPropagation(init?.headers);
-      const traceId = incoming?.traceId ?? randomHex(16);
-      const spanId = randomHex(8);
-      activeTraceContext = { traceId, spanId };
-
-      const headers = client.injectPropagation(init?.headers, {
-        traceId,
-        spanId,
-        traceState: incoming.traceState,
-        baggage: incoming.baggage,
-        sessionId: replay.sessionId,
-      });
-
-      const reqBody = init?.body && typeof init.body === "string" ? init.body : undefined;
-      try {
-        const response = await savedFetch(input, { ...init, headers });
-        const duration = Date.now() - startedMs;
-
-        const netRec: HTTPRecord = {
-          ts: Date.now(),
-          method,
-          url: requestUrl,
-          status: response.status,
-          dur_ms: duration,
-          req_headers: sanitizeHeaders(headers),
-          res_headers: sanitizeHeaders(response.headers),
-          req_body_b64: reqBody ? replay.encodeBody(reqBody) : undefined,
-        };
-
-        captureReplayEvent("network", replay.asNetworkEvent(netRec));
-        if (config.replay?.captureNetworkRecipes !== false) {
-          captureRecipe(replay.toRecipeStep(recipeSteps.length + 1, netRec));
-        }
-
-        client.log("info", `fetch ${method} ${requestUrl} -> ${response.status}`, {
-          traceId,
-          spanId,
-          sessionId: replay.sessionId,
-          method,
-          endpoint: requestUrl,
-          statusCode: response.status,
-          attrs: { duration_ms: duration },
-        });
-        client.span({
-          name: `browser.fetch ${method}`,
-          traceId,
-          spanId,
-          parentSpanId: incoming?.parentSpanId,
-          startUnixNano: startedNs,
-          endUnixNano: nowUnixNano(),
-          statusCode: response.status,
-          attrs: {
-            "http.method": method,
-            "http.url": requestUrl,
-            "http.status_code": response.status,
-            "http.duration_ms": duration,
-            "replay.id": replay.sessionId,
-            "replay_id": replay.sessionId,
-          },
-        });
-
-        return response;
-      } catch (err) {
-        const duration = Date.now() - startedMs;
-        client.log("error", `fetch ${method} ${requestUrl} failed: ${String(err)}`, {
-          traceId,
-          spanId,
-          sessionId: replay.sessionId,
-          method,
-          endpoint: requestUrl,
-          attrs: { duration_ms: duration },
-        });
-        client.span({
-          name: `browser.fetch ${method}`,
-          traceId,
-          spanId,
-          parentSpanId: incoming?.parentSpanId,
-          startUnixNano: startedNs,
-          endUnixNano: nowUnixNano(),
-          statusCode: 500,
-          statusMessage: String(err),
-          attrs: {
-            "http.method": method,
-            "http.url": requestUrl,
-            "http.duration_ms": duration,
-          },
-        });
-        captureReplayEvent("network_error", {
-          method,
-          url: requestUrl,
-          dur_ms: duration,
-          error: String(err),
-        });
-        throw err;
-      }
+    return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      return fetch(input, init);
     };
   };
 
@@ -625,12 +357,11 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     replayBuffers.delete(replay);
 
     if (instances.size === 0) {
-      teardownSharedConsoleCapture();
       teardownSharedNavigationTracker();
       teardownSharedRrwebRecording();
-      teardownSharedXHRInstrumentation();
     }
 
+    await otel.shutdown();
     await client.shutdown();
   };
 
@@ -638,7 +369,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     client,
     sessionId: replay.sessionId,
     log,
-    metric: client.metric.bind(client),
+    metric: metricFn,
     captureException,
     captureError: captureException,
     captureReplayEvent,
@@ -647,14 +378,6 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     instrumentFetch,
     shutdown,
   };
-
-  if (config.instrumentGlobalFetch !== false && typeof window !== "undefined") {
-    window.fetch = instrumentFetch();
-  }
-
-  if (config.instrumentXHR !== false && typeof window !== "undefined") {
-    installSharedXHRInstrumentation();
-  }
 
   return sdk;
 }

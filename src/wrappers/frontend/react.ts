@@ -2,14 +2,10 @@ import type { ObtraceSDKConfig, SDKContext } from "../../shared/types";
 import { initBrowserSDK, type BrowserSDK } from "../../browser/index";
 
 let _sdk: BrowserSDK | null = null;
-const _originalFetch = typeof window !== "undefined" ? window.fetch.bind(window) : undefined;
 
 export function obtrace(config: ObtraceSDKConfig): BrowserSDK {
   if (_sdk) return _sdk;
   _sdk = initBrowserSDK(config);
-  if (typeof window !== "undefined" && _originalFetch) {
-    window.fetch = _sdk.instrumentFetch();
-  }
   return _sdk;
 }
 
