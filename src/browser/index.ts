@@ -12,6 +12,7 @@ export interface BrowserSDK {
   log: (level: "debug" | "info" | "warn" | "error" | "fatal", message: string, context?: SDKContext) => void;
   metric: (name: string, value: number, unit?: string, context?: SDKContext) => void;
   captureException: (error: unknown, context?: SDKContext) => void;
+  captureError: (error: unknown, context?: SDKContext) => void;
   captureReplayEvent: (type: string, payload: Record<string, unknown>) => void;
   flushReplay: () => void;
   captureRecipe: (step: ReplayStep) => void;
@@ -489,16 +490,23 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     await client.shutdown();
   };
 
-  return {
+  const sdk: BrowserSDK = {
     client,
     sessionId: replay.sessionId,
     log,
     metric: client.metric.bind(client),
     captureException,
+    captureError: captureException,
     captureReplayEvent,
     flushReplay,
     captureRecipe,
     instrumentFetch,
     shutdown,
   };
+
+  if (config.instrumentGlobalFetch !== false && typeof window !== "undefined") {
+    window.fetch = instrumentFetch();
+  }
+
+  return sdk;
 }

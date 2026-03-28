@@ -6,9 +6,6 @@ export type { SemanticMetricName } from "./shared/semantic_metrics";
 
 export { initNextBrowserSDK, withNextFetchInstrumentation } from "./wrappers/frontend/next";
 export { initViteBrowserSDK, createViteConfigFromImportMetaEnv } from "./wrappers/frontend/vite";
-export { createReactObtrace } from "./wrappers/frontend/react";
-export { createVueObtrace } from "./wrappers/frontend/vue";
-export { createAngularObtrace } from "./wrappers/frontend/angular";
-export { createSvelteObtrace } from "./wrappers/frontend/svelte";
+export { obtrace, getObtrace, obtraceLog, obtraceMetric, obtraceError } from "./wrappers/frontend/react";
 
 export type { ObtraceSDKConfig, SDKContext, ReplayStep } from "./shared/types";

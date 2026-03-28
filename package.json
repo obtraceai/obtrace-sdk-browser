@@ -1,6 +1,6 @@
 {
   "name": "@obtrace/sdk-browser",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Obtrace Browser SDK with frontend wrappers",
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,14 @@
       "types": "./dist/types/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./auto": {
+      "types": "./dist/types/auto.d.ts",
+      "import": "./dist/auto.js"
+    },
+    "./react": {
+      "types": "./dist/types/wrappers/frontend/react.d.ts",
+      "import": "./dist/wrappers/frontend/react.js"
+    },
     "./browser": {
       "types": "./dist/types/browser_entry.d.ts",
       "import": "./dist/browser_entry.js"
@@ -19,6 +27,12 @@
   },
   "typesVersions": {
     "*": {
+      "auto": [
+        "./dist/types/auto.d.ts"
+      ],
+      "react": [
+        "./dist/types/wrappers/frontend/react.d.ts"
+      ],
       "browser": [
         "./dist/types/browser_entry.d.ts"
       ]
