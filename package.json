@@ -1,6 +1,6 @@
 {
   "name": "@obtrace/sdk-browser",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Obtrace Browser SDK with frontend wrappers",
   "type": "module",
   "license": "MIT",
@@ -19,7 +19,9 @@
   },
   "typesVersions": {
     "*": {
-      "browser": ["./dist/types/browser_entry.d.ts"]
+      "browser": [
+        "./dist/types/browser_entry.d.ts"
+      ]
     }
   },
   "files": [
