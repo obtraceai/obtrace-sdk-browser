@@ -13,7 +13,6 @@
 ```ts
 const sdk = initBrowserSDK({
   apiKey: "<API_KEY>",
-  ingestBaseUrl: "https://inject.obtrace.ai",
   serviceName: "checkout-web",
   replay: { enabled: true, captureNetworkRecipes: true },
   vitals: { enabled: true }

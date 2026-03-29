@@ -3,7 +3,6 @@ import { SemanticMetrics } from "../../src/shared/semantic_metrics";
 
 const sdk = initBrowserSDK({
   apiKey: "devkey",
-  ingestBaseUrl: "https://inject.obtrace.ai",
   tenantId: "tenant-dev",
   projectId: "project-dev",
   appId: "web",

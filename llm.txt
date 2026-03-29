@@ -14,7 +14,7 @@ It reads env vars at build time (VITE_, NEXT_PUBLIC_, REACT_APP_ prefixes).
 
 Explicit init (if needed):
   import { initBrowserSDK } from '@obtrace/sdk-browser/browser'
-  initBrowserSDK({ apiKey: '...', ingestBaseUrl: '...', serviceName: 'my-app' })
+  initBrowserSDK({ apiKey: '...', serviceName: 'my-app' })
 
 What it captures automatically:
 - Errors (unhandled exceptions, promise rejections)
@@ -25,7 +25,6 @@ What it captures automatically:
 
 Env vars:
   OBTRACE_API_KEY         — from app.obtrace.ai
-  OBTRACE_INGEST_BASE_URL — from app.obtrace.ai
   OBTRACE_SERVICE_NAME    — your app name (e.g. "web-app")
 
 Docs: https://docs.obtrace.ai/docs/sdks/browser

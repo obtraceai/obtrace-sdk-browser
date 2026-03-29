@@ -7,9 +7,10 @@ export class ObtraceClient {
   replayTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: ObtraceSDKConfig) {
-    if (!config.apiKey || !config.ingestBaseUrl || !config.serviceName) {
-      throw new Error("apiKey, ingestBaseUrl and serviceName are required");
+    if (!config.apiKey || !config.serviceName) {
+      throw new Error("apiKey and serviceName are required");
     }
+    config.ingestBaseUrl = config.ingestBaseUrl || "https://ingest.obtrace.ai";
     this.config = {
       requestTimeoutMs: 5000,
       defaultHeaders: {},

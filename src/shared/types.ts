@@ -16,7 +16,7 @@ export interface ObtraceResource {
 
 export interface ObtraceSDKConfig {
   apiKey: string;
-  ingestBaseUrl: string;
+  ingestBaseUrl?: string;
   tenantId?: string;
   projectId?: string;
   appId?: string;

@@ -7,10 +7,10 @@ export function initViteBrowserSDK(config: ObtraceSDKConfig) {
 
 export function createViteConfigFromImportMetaEnv(
   env: Record<string, string | undefined>,
-  base: Omit<ObtraceSDKConfig, "apiKey" | "ingestBaseUrl" | "serviceName"> & { serviceName?: string }
+  base: Omit<ObtraceSDKConfig, "apiKey" | "serviceName"> & { serviceName?: string }
 ): ObtraceSDKConfig {
   const apiKey = env.VITE_OBTRACE_API_KEY ?? "";
-  const ingestBaseUrl = env.VITE_OBTRACE_INGEST_BASE_URL ?? "";
+  const ingestBaseUrl = env.VITE_OBTRACE_INGEST_BASE_URL || "https://ingest.obtrace.ai";
   const serviceName = base.serviceName ?? env.VITE_OBTRACE_SERVICE_NAME ?? "vite-app";
 
   return {

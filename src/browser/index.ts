@@ -179,6 +179,8 @@ function userAttrs(): Record<string, string> {
 }
 
 export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
+  config.ingestBaseUrl = config.ingestBaseUrl || "https://ingest.obtrace.ai";
+
   for (const entry of instances) {
     if (entry.config.apiKey === config.apiKey && entry.config.ingestBaseUrl === config.ingestBaseUrl && entry.config.serviceName === config.serviceName) {
       return entry.sdk!;

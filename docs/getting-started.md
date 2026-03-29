@@ -15,7 +15,6 @@ import { initBrowserSDK } from "@obtrace/sdk-browser/browser";
 
 const sdk = initBrowserSDK({
   apiKey: "<API_KEY>",
-  ingestBaseUrl: "https://inject.obtrace.ai",
   serviceName: "web-app",
   tenantId: "tenant-prod",
   projectId: "project-prod",

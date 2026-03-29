@@ -17,7 +17,7 @@ let _observer: MutationObserver | null = null;
 
 interface AutoConfig {
   apiKey: string;
-  ingestBaseUrl: string;
+  ingestBaseUrl?: string;
   serviceName: string;
   appId?: string;
   env?: string;
@@ -91,10 +91,10 @@ function merge(...sources: Partial<AutoConfig>[]): AutoConfig | null {
       }
     }
   }
-  if (!merged.apiKey || !merged.ingestBaseUrl) return null;
+  if (!merged.apiKey) return null;
   return {
     apiKey: merged.apiKey,
-    ingestBaseUrl: merged.ingestBaseUrl,
+    ingestBaseUrl: merged.ingestBaseUrl || "https://ingest.obtrace.ai",
     serviceName: merged.serviceName || "web-app",
     appId: merged.appId,
     env: merged.env || "production",

@@ -1,12 +1,12 @@
 export interface SourceMapUploadOptions {
   apiKey: string;
-  ingestBaseUrl: string;
+  ingestBaseUrl?: string;
   release: string;
   files: Array<{ url: string; sourcemap: string; source?: string }>;
 }
 
 export async function uploadSourceMaps(options: SourceMapUploadOptions): Promise<{ uploaded: number; errors: string[] }> {
-  const baseUrl = options.ingestBaseUrl.replace(/\/$/, "");
+  const baseUrl = (options.ingestBaseUrl || "https://ingest.obtrace.ai").replace(/\/$/, "");
   const errors: string[] = [];
   let uploaded = 0;
 
