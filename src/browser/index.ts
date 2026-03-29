@@ -220,6 +220,27 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   instances.add(entry);
   replayBuffers.add(replay);
 
+  const base = config.ingestBaseUrl?.replace(/\/$/, "") ?? "";
+  fetch(`${base}/v1/init`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      sdk: "obtrace-sdk-browser",
+      sdk_version: "1.0.0",
+      service_name: config.serviceName,
+      service_version: config.serviceVersion ?? "",
+      runtime: "browser",
+      runtime_version: typeof navigator !== "undefined" ? navigator.userAgent : "",
+    }),
+    signal: AbortSignal.timeout(5000),
+  }).then((res) => {
+    if (res.ok && config.debug) console.log("[obtrace-sdk-browser] init handshake OK");
+    if (!res.ok) console.error(`[obtrace-sdk-browser] init handshake failed: ${res.status}`);
+  }).catch(() => {});
+
   if (config.vitals?.enabled !== false) cleanups.push(installWebVitals(meter, !!config.vitals?.reportAllChanges));
   cleanups.push(installBrowserErrorHooks(tracer, replay.sessionId));
   cleanups.push(installClickBreadcrumbs());
