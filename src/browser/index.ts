@@ -228,8 +228,8 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify({
-      sdk: "obtrace-sdk-browser",
-      sdk_version: "1.2.0",
+      sdk: "@obtrace/browser",
+      sdk_version: "1.0.0",
       service_name: config.serviceName,
       service_version: config.serviceVersion ?? "",
       runtime: "browser",
