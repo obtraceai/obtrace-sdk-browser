@@ -229,7 +229,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     },
     body: JSON.stringify({
       sdk: "obtrace-sdk-browser",
-      sdk_version: "1.0.0",
+      sdk_version: "1.0.1",
       service_name: config.serviceName,
       service_version: config.serviceVersion ?? "",
       runtime: "browser",
