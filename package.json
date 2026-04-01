@@ -1,6 +1,6 @@
 {
   "name": "@obtrace/browser",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Obtrace Browser SDK with frontend wrappers",
   "type": "module",
   "license": "MIT",
