@@ -70,16 +70,11 @@ function readEnvConfig(): Partial<AutoConfig> {
   let env: string | undefined;
 
   for (const p of prefixes) {
-    apiKey = apiKey || resolveEnvVar(`${p}OBTRACE_API_KEY`);
-    ingestBaseUrl = ingestBaseUrl || resolveEnvVar(`${p}OBTRACE_INGEST_BASE_URL`);
+    apiKey = apiKey || resolveEnvVar(`${p}OBTRACE_PUBLIC_KEY`) || resolveEnvVar(`${p}OBTRACE_API_KEY`);
     serviceName = serviceName || resolveEnvVar(`${p}OBTRACE_SERVICE_NAME`);
-    appId = appId || resolveEnvVar(`${p}OBTRACE_APP_ID`);
-    env = env || resolveEnvVar(`${p}OBTRACE_ENV`);
   }
 
-  env = env || resolveEnvVar("NODE_ENV");
-
-  return { apiKey, ingestBaseUrl, serviceName, appId, env };
+  return { apiKey, serviceName };
 }
 
 function merge(...sources: Partial<AutoConfig>[]): AutoConfig | null {
@@ -150,7 +145,7 @@ function autoInit() {
 
   console.warn(
     "[obtrace] No configuration found. Provide config via window.__OBTRACE_CONFIG__, " +
-    '<meta name="obtrace-api-key">, or build-time env vars (VITE_OBTRACE_API_KEY, etc). ' +
+    '<meta name="obtrace-api-key">, or VITE_OBTRACE_PUBLIC_KEY env var. ' +
     "Deferring initialization until config appears."
   );
 
