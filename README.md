@@ -14,16 +14,18 @@ bun add @obtrace/sdk-browser
 
 ### Simplified setup
 
-The API key resolves `tenant_id`, `project_id`, `app_id`, and `env` automatically on the server side, so only three fields are needed:
+The API key resolves `tenant_id`, `project_id`, `app_id`, and `env` automatically on the server side. `serviceName` must match the connected app name in the project, or an explicit alias configured for that app.
 
 ```ts
 import { initBrowserSDK } from "@obtrace/sdk-browser/browser";
 
 const sdk = initBrowserSDK({
   apiKey: "obt_live_...",
-  serviceName: "web-app",
+  serviceName: "core",
 });
 ```
+
+If the project app is `core` and the dashboard defines `web` as an alias, `serviceName: "web"` is accepted and normalized to `core` on ingest. Arbitrary names are rejected.
 
 ### Full configuration
 
@@ -34,10 +36,10 @@ import { initBrowserSDK, SemanticMetrics } from "@obtrace/sdk-browser/browser";
 
 const sdk = initBrowserSDK({
   apiKey: "<API_KEY>",
-  serviceName: "web-app",
+  serviceName: "core",
   tenantId: "tenant-prod",
   projectId: "project-prod",
-  appId: "web",
+  appId: "core",
   env: "prod"
 });
 

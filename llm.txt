@@ -14,7 +14,12 @@ It reads env vars at build time (VITE_, NEXT_PUBLIC_, REACT_APP_ prefixes).
 
 Explicit init (if needed):
   import { initBrowserSDK } from '@obtrace/sdk-browser/browser'
-  initBrowserSDK({ apiKey: '...', serviceName: 'my-app' })
+  initBrowserSDK({ apiKey: '...', serviceName: 'core' })
+
+Identity rule:
+- serviceName must match the connected app name in the project, or an explicit alias configured for that app.
+- Example: project app `core` may accept alias `web`; ingest normalizes `web` -> `core`.
+- Arbitrary service names break repo binding, autofix scope, and replay correlation.
 
 What it captures automatically:
 - Errors (unhandled exceptions, promise rejections)
@@ -25,6 +30,6 @@ What it captures automatically:
 
 Env vars:
   OBTRACE_API_KEY         — from app.obtrace.ai
-  OBTRACE_SERVICE_NAME    — your app name (e.g. "web-app")
+  OBTRACE_SERVICE_NAME    — connected app name or explicit alias (e.g. "core" or "web")
 
 Docs: https://docs.obtrace.ai/docs/sdks/browser
