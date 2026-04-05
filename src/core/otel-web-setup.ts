@@ -18,6 +18,7 @@ export interface OtelHandles {
   tracer: Tracer;
   meter: Meter;
   shutdown: () => Promise<void>;
+  forceFlush: () => Promise<void>;
 }
 
 export function setupOtelWeb(config: ObtraceSDKConfig): OtelHandles {
@@ -110,13 +111,19 @@ export function setupOtelWeb(config: ObtraceSDKConfig): OtelHandles {
     instrumentations,
   });
 
-  const tracer = trace.getTracer("@obtrace/sdk-browser", "1.1.0");
-  const meter = metrics.getMeter("@obtrace/sdk-browser", "1.1.0");
+  const tracer = trace.getTracer("@obtrace/sdk-browser", "2.1.0");
+  const meter = metrics.getMeter("@obtrace/sdk-browser", "2.1.0");
+
+  const forceFlush = async () => {
+    try { await tracerProvider.forceFlush(); } catch {}
+    try { await meterProvider.forceFlush(); } catch {}
+  };
 
   const shutdown = async () => {
+    await forceFlush();
     await tracerProvider.shutdown();
     await meterProvider.shutdown();
   };
 
-  return { tracer, meter, shutdown };
+  return { tracer, meter, shutdown, forceFlush };
 }

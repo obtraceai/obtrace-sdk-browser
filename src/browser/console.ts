@@ -26,34 +26,39 @@ export function installConsoleCapture(tracer: Tracer, sessionId: string): () => 
 
     (console as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
       original(...args);
+      try {
+        let message: string;
+        let attrs: Record<string, string | number | boolean> = {};
 
-      let message: string;
-      let attrs: Record<string, string | number | boolean> = {};
+        const safeStringify = (v: unknown): string => {
+          try { return JSON.stringify(v); } catch { return String(v); }
+        };
 
-      if (args.length === 1 && typeof args[0] === "object" && args[0] !== null && !Array.isArray(args[0])) {
-        const obj = args[0] as Record<string, unknown>;
-        message = String(obj.msg || obj.message || JSON.stringify(obj));
-        for (const [k, v] of Object.entries(obj)) {
-          if (k === "msg" || k === "message") continue;
-          if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-            attrs[k] = v;
+        if (args.length === 1 && typeof args[0] === "object" && args[0] !== null && !Array.isArray(args[0])) {
+          const obj = args[0] as Record<string, unknown>;
+          message = String(obj.msg || obj.message || safeStringify(obj));
+          for (const [k, v] of Object.entries(obj)) {
+            if (k === "msg" || k === "message") continue;
+            if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+              attrs[k] = v;
+            }
           }
+        } else {
+          message = args.map(a => typeof a === "string" ? a : safeStringify(a)).join(" ");
         }
-      } else {
-        message = args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
-      }
 
-      addBreadcrumb({ timestamp: Date.now(), category: `console.${method}`, message, level, data: attrs });
+        addBreadcrumb({ timestamp: Date.now(), category: `console.${method}`, message, level, data: attrs });
 
-      const span = tracer.startSpan("browser.console", {
-        attributes: {
-          "log.severity": level.toUpperCase(),
-          "log.message": message.slice(0, 1024),
-          "session.id": sessionId,
-          ...attrs,
-        },
-      });
-      span.end();
+        const span = tracer.startSpan("browser.console", {
+          attributes: {
+            "log.severity": level.toUpperCase(),
+            "log.message": message.slice(0, 1024),
+            "session.id": sessionId,
+            ...attrs,
+          },
+        });
+        span.end();
+      } catch {}
     };
   }
 

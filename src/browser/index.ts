@@ -287,8 +287,16 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     }
   };
 
-  const onVisibility = () => { if (document.visibilityState === "hidden") flushReplay(); };
-  const onBeforeUnload = () => sendViaBeacon();
+  const onVisibility = () => {
+    if (document.visibilityState === "hidden") {
+      otel.forceFlush();
+      flushReplay();
+    }
+  };
+  const onBeforeUnload = () => {
+    otel.forceFlush();
+    sendViaBeacon();
+  };
 
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility);
