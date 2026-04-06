@@ -21,7 +21,7 @@ export interface OtelHandles {
   forceFlush: () => Promise<void>;
 }
 
-export function setupOtelWeb(config: ObtraceSDKConfig): OtelHandles {
+export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }): OtelHandles {
   const baseUrl = (config.ingestBaseUrl || "https://ingest.obtrace.ai").replace(/\/$/, "");
   const authHeaders = {
     Authorization: `Bearer ${config.apiKey}`,
@@ -39,6 +39,7 @@ export function setupOtelWeb(config: ObtraceSDKConfig): OtelHandles {
     ...(config.projectId ? { "obtrace.project_id": config.projectId } : {}),
     ...(config.appId ? { "obtrace.app_id": config.appId } : {}),
     ...(config.env ? { "obtrace.env": config.env } : {}),
+    ...(config.sessionId ? { "session.id": config.sessionId } : {}),
     "runtime.name": "browser",
   });
 

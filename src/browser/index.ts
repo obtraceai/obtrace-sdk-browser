@@ -191,7 +191,13 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const replaySampleRate = config.replaySampleRate ?? 1;
   const shouldReplay = Math.random() < replaySampleRate;
 
-  const otel = setupOtelWeb({ ...config, tracesSampleRate: sampleRate });
+  const replay = new BrowserReplayBuffer({
+    maxChunkBytes: config.replay?.maxChunkBytes ?? 480_000,
+    flushIntervalMs: config.replay?.flushIntervalMs ?? 5000,
+    sessionStorageKey: config.replay?.sessionStorageKey ?? "obtrace_session_id",
+  });
+
+  const otel = setupOtelWeb({ ...config, tracesSampleRate: sampleRate, sessionId: replay.sessionId });
   const tracer = otel.tracer;
   const meter = otel.meter;
 
@@ -207,12 +213,6 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     },
     vitals: { enabled: true, reportAllChanges: false, ...config.vitals },
     propagation: { enabled: true, ...config.propagation },
-  });
-
-  const replay = new BrowserReplayBuffer({
-    maxChunkBytes: config.replay?.maxChunkBytes ?? 480_000,
-    flushIntervalMs: config.replay?.flushIntervalMs ?? 5000,
-    sessionStorageKey: config.replay?.sessionStorageKey ?? "obtrace_session_id",
   });
 
   const recipeSteps: ReplayStep[] = [];
