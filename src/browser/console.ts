@@ -1,4 +1,4 @@
-import type { Tracer } from "@opentelemetry/api";
+import { type Tracer, SpanStatusCode } from "@opentelemetry/api";
 import { addBreadcrumb } from "./breadcrumbs";
 
 const LEVEL_MAP: Record<string, "debug" | "info" | "warn" | "error"> = {
@@ -34,8 +34,22 @@ export function installConsoleCapture(tracer: Tracer, sessionId: string): () => 
           try { return JSON.stringify(v); } catch { return String(v); }
         };
 
-        if (args.length === 1 && typeof args[0] === "object" && args[0] !== null && !Array.isArray(args[0])) {
-          const obj = args[0] as Record<string, unknown>;
+        const firstArg = args[0];
+        const isErrorObj = firstArg instanceof Error;
+
+        if (isErrorObj) {
+          const err = firstArg;
+          message = `${err.name}: ${err.message}`;
+          if (err.stack) attrs["error.stack"] = err.stack.slice(0, 4096);
+          attrs["error.type"] = err.name;
+          for (let i = 1; i < args.length; i++) {
+            const extra = args[i];
+            if (typeof extra === "string" && extra.includes("\n    at ")) {
+              attrs["error.component_stack"] = extra.slice(0, 4096);
+            }
+          }
+        } else if (args.length === 1 && typeof firstArg === "object" && firstArg !== null && !Array.isArray(firstArg)) {
+          const obj = firstArg as Record<string, unknown>;
           message = String(obj.msg || obj.message || safeStringify(obj));
           for (const [k, v] of Object.entries(obj)) {
             if (k === "msg" || k === "message") continue;
@@ -45,11 +59,20 @@ export function installConsoleCapture(tracer: Tracer, sessionId: string): () => 
           }
         } else {
           message = args.map(a => typeof a === "string" ? a : safeStringify(a)).join(" ");
+          if (method === "error") {
+            for (const a of args) {
+              if (typeof a === "string" && a.includes("\n    at ")) {
+                attrs["error.stack"] = a.slice(0, 4096);
+                break;
+              }
+            }
+          }
         }
 
         addBreadcrumb({ timestamp: Date.now(), category: `console.${method}`, message, level, data: attrs });
 
-        const span = tracer.startSpan("browser.console", {
+        const spanName = (method === "error" && (isErrorObj || attrs["error.stack"])) ? "browser.error" : "browser.console";
+        const span = tracer.startSpan(spanName, {
           attributes: {
             "log.severity": level.toUpperCase(),
             "log.message": message.slice(0, 1024),
@@ -57,6 +80,10 @@ export function installConsoleCapture(tracer: Tracer, sessionId: string): () => 
             ...attrs,
           },
         });
+        if (method === "error") {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: message.slice(0, 1024) });
+          if (isErrorObj) span.recordException(firstArg);
+        }
         span.end();
       } catch {}
     };
