@@ -1,6 +1,6 @@
 {
   "name": "@obtrace/browser",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Obtrace Browser SDK with frontend wrappers",
   "type": "module",
   "license": "MIT",
@@ -66,6 +66,7 @@
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/context-zone": "^1.30.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.214.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.57.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
     "@opentelemetry/instrumentation-document-load": "^0.43.0",
@@ -73,6 +74,7 @@
     "@opentelemetry/instrumentation-user-interaction": "^0.43.0",
     "@opentelemetry/instrumentation-xml-http-request": "^0.57.0",
     "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/sdk-logs": "^0.214.0",
     "@opentelemetry/sdk-metrics": "^1.30.0",
     "@opentelemetry/sdk-trace-web": "^1.30.0",
     "@opentelemetry/semantic-conventions": "^1.30.0",

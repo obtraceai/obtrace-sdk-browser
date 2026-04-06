@@ -4,6 +4,8 @@ import { BatchSpanProcessor, TraceIdRatioBasedSampler, ParentBasedSampler } from
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
+import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { Resource } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
@@ -17,6 +19,7 @@ import type { ObtraceSDKConfig } from "../shared/types";
 export interface OtelHandles {
   tracer: Tracer;
   meter: Meter;
+  loggerProvider: LoggerProvider;
   shutdown: () => Promise<void>;
   forceFlush: () => Promise<void>;
 }
@@ -80,6 +83,16 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
 
   metrics.setGlobalMeterProvider(meterProvider);
 
+  const logExporter = new OTLPLogExporter({
+    url: `${baseUrl}/otlp/v1/logs`,
+    headers: authHeaders,
+  });
+
+  const loggerProvider = new LoggerProvider({
+    resource: resource as any,
+    processors: [new BatchLogRecordProcessor(logExporter)],
+  });
+
   const ingestPattern = new RegExp(`^${baseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 
   const instrumentations = [];
@@ -112,19 +125,21 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
     instrumentations,
   });
 
-  const tracer = trace.getTracer("@obtrace/sdk-browser", "2.1.0");
-  const meter = metrics.getMeter("@obtrace/sdk-browser", "2.1.0");
+  const tracer = trace.getTracer("@obtrace/sdk-browser", "2.2.0");
+  const meter = metrics.getMeter("@obtrace/sdk-browser", "2.2.0");
 
   const forceFlush = async () => {
     try { await tracerProvider.forceFlush(); } catch {}
     try { await meterProvider.forceFlush(); } catch {}
+    try { await loggerProvider.forceFlush(); } catch {}
   };
 
   const shutdown = async () => {
     await forceFlush();
     await tracerProvider.shutdown();
     await meterProvider.shutdown();
+    await loggerProvider.shutdown();
   };
 
-  return { tracer, meter, shutdown, forceFlush };
+  return { tracer, meter, loggerProvider, shutdown, forceFlush };
 }

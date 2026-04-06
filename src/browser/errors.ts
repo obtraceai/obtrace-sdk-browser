@@ -1,7 +1,9 @@
 import { type Tracer, SpanStatusCode } from "@opentelemetry/api";
+import { SeverityNumber } from "@opentelemetry/api-logs";
+import type { Logger } from "@opentelemetry/api-logs";
 import { addBreadcrumb, getBreadcrumbs } from "./breadcrumbs";
 
-export function installBrowserErrorHooks(tracer: Tracer, sessionId?: string): () => void {
+export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, sessionId?: string): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
   }
@@ -12,19 +14,30 @@ export function installBrowserErrorHooks(tracer: Tracer, sessionId?: string): ()
     try {
       const breadcrumbs = getBreadcrumbs();
       const stack = ev.error instanceof Error ? ev.error.stack || "" : "";
-      const span = tracer.startSpan("browser.error", {
+      const errorType = ev.error?.constructor?.name || "Error";
+      const attrs: Record<string, string | number> = {
+        "error.message": message,
+        "error.file": ev.filename || "",
+        "error.line": ev.lineno || 0,
+        "error.column": ev.colno || 0,
+        "error.stack": stack.slice(0, 4096),
+        "error.type": errorType,
+        "breadcrumbs.count": breadcrumbs.length,
+        "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-20)),
+        ...(sessionId ? { "session.id": sessionId } : {}),
+      };
+
+      logger.emit({
+        severityNumber: SeverityNumber.ERROR,
+        severityText: "ERROR",
+        body: message,
         attributes: {
-          "error.message": message,
-          "error.file": ev.filename || "",
-          "error.line": ev.lineno || 0,
-          "error.column": ev.colno || 0,
-          "error.stack": stack.slice(0, 4096),
-          "error.type": ev.error?.constructor?.name || "Error",
-          "breadcrumbs.count": breadcrumbs.length,
-          "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-20)),
-          ...(sessionId ? { "session.id": sessionId } : {}),
+          "log.source": "window.error",
+          ...attrs,
         },
       });
+
+      const span = tracer.startSpan("browser.error", { attributes: attrs });
       span.setStatus({ code: SpanStatusCode.ERROR, message });
       if (ev.error instanceof Error) {
         span.recordException(ev.error);
@@ -36,25 +49,37 @@ export function installBrowserErrorHooks(tracer: Tracer, sessionId?: string): ()
   const onRejection = (ev: PromiseRejectionEvent) => {
     let reason: string;
     let stack = "";
+    let errorType = "UnhandledRejection";
     if (ev.reason instanceof Error) {
       reason = `${ev.reason.name}: ${ev.reason.message}`;
       stack = ev.reason.stack || "";
+      errorType = ev.reason.constructor?.name || "Error";
     } else {
       reason = typeof ev.reason === "string" ? ev.reason : JSON.stringify(ev.reason ?? {});
     }
     addBreadcrumb({ timestamp: Date.now(), category: "error", message: reason, level: "error" });
     try {
       const breadcrumbs = getBreadcrumbs();
-      const span = tracer.startSpan("browser.unhandledrejection", {
+      const attrs: Record<string, string | number> = {
+        "error.message": reason,
+        "error.stack": stack.slice(0, 4096),
+        "error.type": errorType,
+        "breadcrumbs.count": breadcrumbs.length,
+        "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-20)),
+        ...(sessionId ? { "session.id": sessionId } : {}),
+      };
+
+      logger.emit({
+        severityNumber: SeverityNumber.ERROR,
+        severityText: "ERROR",
+        body: reason,
         attributes: {
-          "error.message": reason,
-          "error.stack": stack.slice(0, 4096),
-          "error.type": ev.reason?.constructor?.name || "UnhandledRejection",
-          "breadcrumbs.count": breadcrumbs.length,
-          "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-20)),
-          ...(sessionId ? { "session.id": sessionId } : {}),
+          "log.source": "unhandledrejection",
+          ...attrs,
         },
       });
+
+      const span = tracer.startSpan("browser.unhandledrejection", { attributes: attrs });
       span.setStatus({ code: SpanStatusCode.ERROR, message: reason });
       if (ev.reason instanceof Error) {
         span.recordException(ev.reason);

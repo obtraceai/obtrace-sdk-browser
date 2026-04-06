@@ -1,6 +1,7 @@
 import { record } from "rrweb";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { Tracer, Meter } from "@opentelemetry/api";
+import { SeverityNumber } from "@opentelemetry/api-logs";
 import { ObtraceClient } from "../core/client";
 import { setupOtelWeb, type OtelHandles } from "../core/otel-web-setup";
 import type { ObtraceSDKConfig, ReplayStep, SDKContext } from "../shared/types";
@@ -200,6 +201,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const otel = setupOtelWeb({ ...config, tracesSampleRate: sampleRate, sessionId: replay.sessionId });
   const tracer = otel.tracer;
   const meter = otel.meter;
+  const logger = otel.loggerProvider.getLogger("@obtrace/sdk-browser", "2.2.0");
 
   const client = new ObtraceClient({
     ...config,
@@ -244,7 +246,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   }).catch(() => {});
 
   if (config.vitals?.enabled !== false) cleanups.push(installWebVitals(meter, !!config.vitals?.reportAllChanges));
-  cleanups.push(installBrowserErrorHooks(tracer, replay.sessionId));
+  cleanups.push(installBrowserErrorHooks(tracer, logger, replay.sessionId));
   cleanups.push(installClickBreadcrumbs());
   cleanups.push(installClickTracking(tracer, replay.sessionId));
   cleanups.push(installResourceTiming(meter));
@@ -252,7 +254,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   cleanups.push(installMemoryTracking(meter));
 
   if (config.captureConsole !== false) {
-    cleanups.push(installConsoleCapture(tracer, replay.sessionId));
+    cleanups.push(installConsoleCapture(tracer, logger, replay.sessionId));
   }
 
   cleanups.push(installOfflineSupport());
@@ -307,21 +309,43 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     cleanups.push(() => window.removeEventListener("beforeunload", onBeforeUnload));
   }
 
+  const sevToOtel: Record<string, SeverityNumber> = {
+    debug: SeverityNumber.DEBUG,
+    info: SeverityNumber.INFO,
+    warn: SeverityNumber.WARN,
+    error: SeverityNumber.ERROR,
+    fatal: SeverityNumber.FATAL,
+  };
+
   const log = (level: "debug" | "info" | "warn" | "error" | "fatal", message: string, context?: SDKContext) => {
     addCrumb({ timestamp: Date.now(), category: "log", message, level: level === "fatal" ? "error" : level });
-    const span = tracer.startSpan("browser.log", {
+
+    logger.emit({
+      severityNumber: sevToOtel[level] ?? SeverityNumber.INFO,
+      severityText: level.toUpperCase(),
+      body: message.slice(0, 4096),
       attributes: {
-        "log.severity": level.toUpperCase(),
-        "log.severity_number": severityToNumber(level),
-        "log.message": message,
         "session.id": replay.sessionId,
+        "log.source": "sdk",
         ...userAttrs(),
         ...(context?.traceId ? { "obtrace.trace_id": context.traceId } : {}),
         ...context?.attrs,
       },
     });
-    if (level === "error" || level === "fatal") span.setStatus({ code: SpanStatusCode.ERROR, message });
-    span.end();
+
+    if (level === "error" || level === "fatal") {
+      const span = tracer.startSpan("browser.error", {
+        attributes: {
+          "error.message": message,
+          "session.id": replay.sessionId,
+          ...userAttrs(),
+          ...(context?.traceId ? { "obtrace.trace_id": context.traceId } : {}),
+          ...context?.attrs,
+        },
+      });
+      span.setStatus({ code: SpanStatusCode.ERROR, message });
+      span.end();
+    }
   };
 
   const metricFn = (name: string, value: number, unit?: string, context?: SDKContext) => {
@@ -331,11 +355,28 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
   const captureException = (error: unknown, context?: SDKContext) => {
     const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const stack = error instanceof Error ? (error.stack || "").slice(0, 4096) : "";
     const breadcrumbs = getBreadcrumbs();
     addCrumb({ timestamp: Date.now(), category: "error", message: msg, level: "error" });
+
+    logger.emit({
+      severityNumber: SeverityNumber.ERROR,
+      severityText: "ERROR",
+      body: msg,
+      attributes: {
+        "session.id": replay.sessionId,
+        "log.source": "exception",
+        "error.stack": stack,
+        "error.type": error instanceof Error ? error.name : "Error",
+        ...userAttrs(),
+        ...context?.attrs,
+      },
+    });
+
     const span = tracer.startSpan("browser.exception", {
       attributes: {
         "error.message": msg,
+        "error.stack": stack,
         "session.id": replay.sessionId,
         "breadcrumbs.count": breadcrumbs.length,
         "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-20)),

@@ -1,4 +1,6 @@
 import { type Tracer, SpanStatusCode } from "@opentelemetry/api";
+import { SeverityNumber } from "@opentelemetry/api-logs";
+import type { Logger } from "@opentelemetry/api-logs";
 import { addBreadcrumb } from "./breadcrumbs";
 
 const LEVEL_MAP: Record<string, "debug" | "info" | "warn" | "error"> = {
@@ -9,10 +11,18 @@ const LEVEL_MAP: Record<string, "debug" | "info" | "warn" | "error"> = {
   error: "error",
 };
 
+const SEVERITY_MAP: Record<string, SeverityNumber> = {
+  debug: SeverityNumber.DEBUG,
+  log: SeverityNumber.INFO,
+  info: SeverityNumber.INFO,
+  warn: SeverityNumber.WARN,
+  error: SeverityNumber.ERROR,
+};
+
 let patched = false;
 let originals: Record<string, (...args: unknown[]) => void> = {};
 
-export function installConsoleCapture(tracer: Tracer, sessionId: string): () => void {
+export function installConsoleCapture(tracer: Tracer, logger: Logger, sessionId: string): () => void {
   if (patched || typeof console === "undefined") return () => {};
   patched = true;
 
@@ -71,20 +81,30 @@ export function installConsoleCapture(tracer: Tracer, sessionId: string): () => 
 
         addBreadcrumb({ timestamp: Date.now(), category: `console.${method}`, message, level, data: attrs });
 
-        const spanName = (method === "error" && (isErrorObj || attrs["error.stack"])) ? "browser.error" : "browser.console";
-        const span = tracer.startSpan(spanName, {
+        logger.emit({
+          severityNumber: SEVERITY_MAP[method] ?? SeverityNumber.INFO,
+          severityText: level.toUpperCase(),
+          body: message.slice(0, 4096),
           attributes: {
-            "log.severity": level.toUpperCase(),
-            "log.message": message.slice(0, 1024),
             "session.id": sessionId,
+            "log.source": "console",
             ...attrs,
           },
         });
+
         if (method === "error") {
+          const spanName = (isErrorObj || attrs["error.stack"]) ? "browser.error" : "browser.console";
+          const span = tracer.startSpan(spanName, {
+            attributes: {
+              "error.message": message.slice(0, 1024),
+              "session.id": sessionId,
+              ...attrs,
+            },
+          });
           span.setStatus({ code: SpanStatusCode.ERROR, message: message.slice(0, 1024) });
           if (isErrorObj) span.recordException(firstArg);
+          span.end();
         }
-        span.end();
       } catch {}
     };
   }
