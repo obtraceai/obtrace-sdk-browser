@@ -1,4 +1,4 @@
-import { trace, metrics, type Tracer, type Meter } from "@opentelemetry/api";
+import { trace, metrics, context, SpanStatusCode, type Tracer, type Meter, type Span } from "@opentelemetry/api";
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { BatchSpanProcessor, TraceIdRatioBasedSampler, ParentBasedSampler } from "@opentelemetry/sdk-trace-web";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -15,7 +15,7 @@ import { UserInteractionInstrumentation } from "@opentelemetry/instrumentation-u
 import { ZoneContextManager } from "@opentelemetry/context-zone";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import type { ObtraceSDKConfig } from "../shared/types";
-import { enrichSupabaseSpan, isSupabaseURL } from "../browser/supabase";
+import { enrichSupabaseSpan, isSupabaseURL, parseSupabaseURL } from "../browser/supabase";
 
 export interface OtelHandles {
   tracer: Tracer;
@@ -98,13 +98,60 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
 
   const instrumentations = [];
 
-  const applySupabaseAttrs = (span: import("@opentelemetry/api").Span, req: any, _result?: any) => {
+  const sessionId = config.sessionId || "";
+
+  const applySupabaseAttrs = (parentSpan: Span, req: any, result?: any) => {
     try {
       const url = typeof req === "string" ? req : req instanceof URL ? req.href : req?.url || "";
       const method = req?.method || "GET";
-      if (url && isSupabaseURL(url)) {
-        enrichSupabaseSpan(span, url, method);
-      }
+      if (!url || !isSupabaseURL(url)) return;
+      enrichSupabaseSpan(parentSpan, url, method);
+      if (sessionId) parentSpan.setAttribute("session.id", sessionId);
+      const parsed = parseSupabaseURL(url, method);
+      if (!parsed) return;
+      const status = typeof result?.status === "number" ? result.status : 0;
+      const t = trace.getTracer("@obtrace/sdk-browser", "2.4.0");
+      const synth = { "session.id": sessionId, "supabase.ref": parsed.ref, "span.synthetic": "true" };
+      const parentCtx = trace.setSpan(context.active(), parentSpan);
+      context.with(parentCtx, () => {
+        const gw = t.startSpan("supabase.gateway", {
+          attributes: { ...synth, "http.method": method.toUpperCase(), "http.status_code": status, "peer.service": "supabase.kong" },
+        });
+        const gwCtx = trace.setSpan(context.active(), gw);
+        context.with(gwCtx, () => {
+          if (parsed.service === "postgrest") {
+            const db = t.startSpan("supabase.db.query", {
+              attributes: { ...synth, "db.system": "postgresql", "db.operation": parsed.operation, "db.sql.table": parsed.table, "db.statement": parsed.detail, "peer.service": "supabase.postgresql" },
+            });
+            db.setStatus({ code: status >= 400 ? SpanStatusCode.ERROR : SpanStatusCode.OK });
+            db.end();
+          }
+          if (parsed.service === "auth") {
+            const auth = t.startSpan("supabase.auth." + parsed.operation, {
+              attributes: { ...synth, "auth.operation": parsed.operation, "peer.service": "supabase.gotrue" },
+            });
+            auth.setStatus({ code: status >= 400 ? SpanStatusCode.ERROR : SpanStatusCode.OK });
+            auth.end();
+          }
+          if (parsed.service === "storage") {
+            const stor = t.startSpan("supabase.storage." + parsed.operation, {
+              attributes: { ...synth, "storage.operation": parsed.operation, "peer.service": "supabase.storage" },
+            });
+            stor.setStatus({ code: status >= 400 ? SpanStatusCode.ERROR : SpanStatusCode.OK });
+            stor.end();
+          }
+          if (parsed.service === "edge-function") {
+            const fnName = parsed.operation.replace("invoke:", "");
+            const fn = t.startSpan("supabase.function." + fnName, {
+              attributes: { ...synth, "faas.name": fnName, "faas.trigger": "http", "peer.service": "supabase.edge-runtime" },
+            });
+            fn.setStatus({ code: status >= 400 ? SpanStatusCode.ERROR : SpanStatusCode.OK });
+            fn.end();
+          }
+        });
+        gw.setStatus({ code: status >= 400 ? SpanStatusCode.ERROR : SpanStatusCode.OK });
+        gw.end();
+      });
     } catch {}
   };
 
