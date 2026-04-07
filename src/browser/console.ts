@@ -21,6 +21,7 @@ const SEVERITY_MAP: Record<string, SeverityNumber> = {
 
 let patched = false;
 let originals: Record<string, (...args: unknown[]) => void> = {};
+let emitting = false;
 
 export function installConsoleCapture(tracer: Tracer, logger: Logger, sessionId: string): () => void {
   if (patched || typeof console === "undefined") return () => {};
@@ -36,7 +37,9 @@ export function installConsoleCapture(tracer: Tracer, logger: Logger, sessionId:
 
     (console as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
       original(...args);
+      if (emitting) return;
       try {
+        emitting = true;
         let message: string;
         let attrs: Record<string, string | number | boolean> = {};
 
@@ -105,7 +108,7 @@ export function installConsoleCapture(tracer: Tracer, logger: Logger, sessionId:
           if (isErrorObj) span.recordException(firstArg);
           span.end();
         }
-      } catch {}
+      } catch {} finally { emitting = false; }
     };
   }
 

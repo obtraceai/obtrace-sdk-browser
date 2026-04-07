@@ -3,15 +3,19 @@ import { SeverityNumber } from "@opentelemetry/api-logs";
 import type { Logger } from "@opentelemetry/api-logs";
 import { addBreadcrumb, getBreadcrumbs } from "./breadcrumbs";
 
+let processing = false;
+
 export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, sessionId?: string): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
   }
 
   const onError = (ev: ErrorEvent) => {
+    if (processing) return;
     const message = ev.message || "window.error";
     addBreadcrumb({ timestamp: Date.now(), category: "error", message, level: "error" });
     try {
+      processing = true;
       const breadcrumbs = getBreadcrumbs();
       const stack = ev.error instanceof Error ? ev.error.stack || "" : "";
       const errorType = ev.error?.constructor?.name || "Error";
@@ -43,10 +47,11 @@ export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, session
         span.recordException(ev.error);
       }
       span.end();
-    } catch {}
+    } catch {} finally { processing = false; }
   };
 
   const onRejection = (ev: PromiseRejectionEvent) => {
+    if (processing) return;
     let reason: string;
     let stack = "";
     let errorType = "UnhandledRejection";
@@ -59,6 +64,7 @@ export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, session
     }
     addBreadcrumb({ timestamp: Date.now(), category: "error", message: reason, level: "error" });
     try {
+      processing = true;
       const breadcrumbs = getBreadcrumbs();
       const attrs: Record<string, string | number> = {
         "error.message": reason,
@@ -85,7 +91,7 @@ export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, session
         span.recordException(ev.reason);
       }
       span.end();
-    } catch {}
+    } catch {} finally { processing = false; }
   };
 
   window.addEventListener("error", onError);
