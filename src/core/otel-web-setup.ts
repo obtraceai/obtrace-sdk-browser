@@ -15,6 +15,7 @@ import { UserInteractionInstrumentation } from "@opentelemetry/instrumentation-u
 import { ZoneContextManager } from "@opentelemetry/context-zone";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import type { ObtraceSDKConfig } from "../shared/types";
+import { enrichSupabaseSpan, isSupabaseURL } from "../browser/supabase";
 
 export interface OtelHandles {
   tracer: Tracer;
@@ -97,12 +98,23 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
 
   const instrumentations = [];
 
+  const applySupabaseAttrs = (span: import("@opentelemetry/api").Span, req: any, _result?: any) => {
+    try {
+      const url = typeof req === "string" ? req : req instanceof URL ? req.href : req?.url || "";
+      const method = req?.method || "GET";
+      if (url && isSupabaseURL(url)) {
+        enrichSupabaseSpan(span, url, method);
+      }
+    } catch {}
+  };
+
   if (config.instrumentGlobalFetch !== false) {
     instrumentations.push(
       new FetchInstrumentation({
         propagateTraceHeaderCorsUrls: /.*/,
         ignoreUrls: [ingestPattern],
         clearTimingResources: true,
+        applyCustomAttributesOnSpan: applySupabaseAttrs,
       })
     );
   }

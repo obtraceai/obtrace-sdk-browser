@@ -15,6 +15,7 @@ import { installResourceTiming } from "./resources";
 import { installLongTaskDetection } from "./longtasks";
 import { installMemoryTracking } from "./memory";
 import { installOfflineSupport } from "./offline";
+import { installSupabaseFetchInterceptor } from "./supabase-intercept";
 
 export type UserContext = { id?: string; email?: string; name?: string; [key: string]: unknown };
 
@@ -252,6 +253,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   cleanups.push(installResourceTiming(meter));
   cleanups.push(installLongTaskDetection(tracer));
   cleanups.push(installMemoryTracking(meter));
+  cleanups.push(installSupabaseFetchInterceptor(tracer, replay.sessionId));
 
   if (config.captureConsole !== false) {
     cleanups.push(installConsoleCapture(tracer, logger, replay.sessionId));
