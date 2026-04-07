@@ -280,7 +280,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   }, config.replay?.flushIntervalMs ?? 5000);
 
   const sendViaBeacon = () => {
-    const url = `${config.ingestBaseUrl?.replace(/\/$/, "")}/ingest/replay/chunk`;
+    const url = `${config.ingestBaseUrl?.replace(/\/$/, "")}/ingest/replay/chunk?token=${encodeURIComponent(config.apiKey)}`;
     const freshChunk = replay.flush();
     if (freshChunk) {
       navigator.sendBeacon(url, new Blob([JSON.stringify(freshChunk)], { type: "application/json" }));
