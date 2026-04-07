@@ -137,8 +137,8 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
     instrumentations,
   });
 
-  const tracer = trace.getTracer("@obtrace/sdk-browser", "2.2.0");
-  const meter = metrics.getMeter("@obtrace/sdk-browser", "2.2.0");
+  const tracer = trace.getTracer("@obtrace/sdk-browser", "2.4.0");
+  const meter = metrics.getMeter("@obtrace/sdk-browser", "2.4.0");
 
   const forceFlush = async () => {
     try { await tracerProvider.forceFlush(); } catch {}

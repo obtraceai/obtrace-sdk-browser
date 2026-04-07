@@ -202,7 +202,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const otel = setupOtelWeb({ ...config, tracesSampleRate: sampleRate, sessionId: replay.sessionId });
   const tracer = otel.tracer;
   const meter = otel.meter;
-  const logger = otel.loggerProvider.getLogger("@obtrace/sdk-browser", "2.2.0");
+  const logger = otel.loggerProvider.getLogger("@obtrace/sdk-browser", "2.4.0");
 
   const client = new ObtraceClient({
     ...config,
