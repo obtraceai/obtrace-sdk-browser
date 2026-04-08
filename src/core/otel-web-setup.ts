@@ -1,4 +1,4 @@
-import { trace, metrics, context, SpanStatusCode, type Tracer, type Meter, type Span } from "@opentelemetry/api";
+import { trace, metrics, context, SpanStatusCode, ROOT_CONTEXT, type Tracer, type Meter, type Span } from "@opentelemetry/api";
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { BatchSpanProcessor, TraceIdRatioBasedSampler, ParentBasedSampler } from "@opentelemetry/sdk-trace-web";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -110,14 +110,14 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
       const parsed = parseSupabaseURL(url, method);
       if (!parsed) return;
       const status = typeof result?.status === "number" ? result.status : 0;
-      const t = trace.getTracer("@obtrace/sdk-browser", "2.4.0");
+      const t = trace.getTracer("@obtrace/sdk-browser", "2.5.1");
       const synth = { "session.id": sessionId, "supabase.ref": parsed.ref, "span.synthetic": "true" };
-      const parentCtx = trace.setSpan(context.active(), parentSpan);
+      const parentCtx = trace.setSpan(ROOT_CONTEXT, parentSpan);
       context.with(parentCtx, () => {
         const gw = t.startSpan("supabase.gateway", {
           attributes: { ...synth, "http.method": method.toUpperCase(), "http.status_code": status, "peer.service": "supabase.kong" },
         });
-        const gwCtx = trace.setSpan(context.active(), gw);
+        const gwCtx = trace.setSpan(ROOT_CONTEXT, gw);
         context.with(gwCtx, () => {
           if (parsed.service === "postgrest") {
             const db = t.startSpan("supabase.db.query", {

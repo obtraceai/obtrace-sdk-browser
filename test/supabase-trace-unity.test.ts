@@ -5,6 +5,7 @@ import {
   trace,
   context,
   SpanStatusCode,
+  ROOT_CONTEXT,
   type Span,
   type Tracer,
 } from "@opentelemetry/api";
@@ -53,12 +54,12 @@ function createSupabaseChildSpans(
   const parsed = parseSupabaseURL(url, method);
   if (!parsed) return;
   const synth = { "session.id": sessionId, "supabase.ref": parsed.ref, "span.synthetic": "true" };
-  const parentCtx = trace.setSpan(context.active(), parentSpan);
+  const parentCtx = trace.setSpan(ROOT_CONTEXT, parentSpan);
   context.with(parentCtx, () => {
     const gw = tracer.startSpan("supabase.gateway", {
       attributes: { ...synth, "http.method": method.toUpperCase(), "http.status_code": status, "peer.service": "supabase.kong" },
     });
-    const gwCtx = trace.setSpan(context.active(), gw);
+    const gwCtx = trace.setSpan(ROOT_CONTEXT, gw);
     context.with(gwCtx, () => {
       if (parsed.service === "postgrest") {
         const db = tracer.startSpan("supabase.db.query", {
