@@ -27,7 +27,7 @@ export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, session
         "error.stack": stack.slice(0, 4096),
         "error.type": errorType,
         "breadcrumbs.count": breadcrumbs.length,
-        "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-20)),
+        "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-5)),
         ...(sessionId ? { "session.id": sessionId } : {}),
       };
 
@@ -71,7 +71,7 @@ export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, session
         "error.stack": stack.slice(0, 4096),
         "error.type": errorType,
         "breadcrumbs.count": breadcrumbs.length,
-        "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-20)),
+        "breadcrumbs.json": JSON.stringify(breadcrumbs.slice(-5)),
         ...(sessionId ? { "session.id": sessionId } : {}),
       };
 

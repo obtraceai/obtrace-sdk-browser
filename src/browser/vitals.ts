@@ -66,7 +66,12 @@ export function installWebVitals(meter: Meter, reportAllChanges: boolean): () =>
       interactionDurations.set(ev.interactionId, ev.duration);
     }
 
-    if (interactionDurations.size > 50) {
+    if (interactionDurations.size > 100) {
+      const entries = [...interactionDurations.entries()].sort((a, b) => b[1] - a[1]);
+      interactionDurations.clear();
+      for (const [k, v] of entries.slice(0, 50)) interactionDurations.set(k, v);
+    }
+    if (interactionDurations.size > 10) {
       const sorted = [...interactionDurations.values()].sort((a, b) => b - a);
       const p98Index = Math.max(0, Math.ceil(sorted.length * 0.02) - 1);
       inpGauge.record(sorted[p98Index], { vital: "inp" });

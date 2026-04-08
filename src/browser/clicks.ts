@@ -26,6 +26,14 @@ export function installClickTracking(tracer: Tracer, sessionId: string): () => v
     const selector = getElementSelector(target);
     const now = Date.now();
 
+    addBreadcrumb({
+      timestamp: now,
+      category: "ui.click",
+      message: selector,
+      level: "info",
+      data: { x: ev.clientX, y: ev.clientY },
+    });
+
     recent.push({ selector, timestamp: now });
     while (recent.length > 0 && now - recent[0].timestamp > RAGE_WINDOW_MS) {
       recent.shift();

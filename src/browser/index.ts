@@ -8,7 +8,7 @@ import type { ObtraceSDKConfig, ReplayStep, SDKContext } from "../shared/types";
 import { installBrowserErrorHooks } from "./errors";
 import { BrowserReplayBuffer } from "./replay";
 import { installWebVitals } from "./vitals";
-import { addBreadcrumb as addCrumb, getBreadcrumbs, installClickBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
+import { addBreadcrumb as addCrumb, getBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
 import { installConsoleCapture } from "./console";
 import { installClickTracking } from "./clicks";
 import { installResourceTiming } from "./resources";
@@ -247,7 +247,6 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
   if (config.vitals?.enabled !== false) cleanups.push(installWebVitals(meter, !!config.vitals?.reportAllChanges));
   cleanups.push(installBrowserErrorHooks(tracer, logger, replay.sessionId));
-  cleanups.push(installClickBreadcrumbs());
   cleanups.push(installClickTracking(tracer, replay.sessionId));
   cleanups.push(installResourceTiming(meter));
   cleanups.push(installLongTaskDetection(tracer));
@@ -269,11 +268,17 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
 
   let pendingBeaconBlob: Blob | null = null;
 
+  const scheduleIdle = typeof requestIdleCallback === "function"
+    ? (fn: () => void) => requestIdleCallback(fn, { timeout: 2000 })
+    : (fn: () => void) => setTimeout(fn, 0);
+
   client.replayTimer = setInterval(() => {
     const chunk = replay.flush();
     if (chunk) {
-      const json = JSON.stringify(chunk);
-      pendingBeaconBlob = new Blob([json], { type: "application/json" });
+      scheduleIdle(() => {
+        const json = JSON.stringify(chunk);
+        pendingBeaconBlob = new Blob([json], { type: "application/json" });
+      });
       client.replayChunk(chunk);
     } else {
       pendingBeaconBlob = null;
@@ -351,8 +356,14 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
     }
   };
 
+  const gaugeCache = new Map<string, ReturnType<typeof meter.createGauge>>();
   const metricFn = (name: string, value: number, unit?: string, context?: SDKContext) => {
-    const gauge = meter.createGauge(name, { unit: unit ?? "1" });
+    const key = `${name}\0${unit ?? "1"}`;
+    let gauge = gaugeCache.get(key);
+    if (!gauge) {
+      gauge = meter.createGauge(name, { unit: unit ?? "1" });
+      gaugeCache.set(key, gauge);
+    }
     gauge.record(value, { ...userAttrs(), ...context?.attrs } as Record<string, string | number> | undefined);
   };
 

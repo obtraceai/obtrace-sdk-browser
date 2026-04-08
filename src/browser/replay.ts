@@ -5,8 +5,8 @@ import { sanitizeHeaders, stripQuery, toBase64 } from "../shared/utils";
 
 const KEY_OVERHEAD = 6;
 
-function estimateObjectBytes(value: unknown): number {
-  if (value === null || value === undefined) return 4;
+function estimateObjectBytes(value: unknown, depth = 0): number {
+  if (depth > 8 || value === null || value === undefined) return 4;
   switch (typeof value) {
     case "string":
       return (value as string).length + 2;
@@ -17,14 +17,14 @@ function estimateObjectBytes(value: unknown): number {
       if (Array.isArray(value)) {
         let sum = 2;
         for (let i = 0; i < value.length; i++) {
-          sum += estimateObjectBytes(value[i]) + 1;
+          sum += estimateObjectBytes(value[i], depth + 1) + 1;
         }
         return sum;
       }
       let sum = 2;
       const keys = Object.keys(value as Record<string, unknown>);
       for (let i = 0; i < keys.length; i++) {
-        sum += keys[i].length + KEY_OVERHEAD + estimateObjectBytes((value as Record<string, unknown>)[keys[i]]);
+        sum += keys[i].length + KEY_OVERHEAD + estimateObjectBytes((value as Record<string, unknown>)[keys[i]], depth + 1);
       }
       return sum;
     }
