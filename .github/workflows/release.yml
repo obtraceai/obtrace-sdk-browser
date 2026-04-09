@@ -19,7 +19,7 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
       created: ${{ steps.tag.outputs.created }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
@@ -47,7 +47,7 @@ jobs:
     needs: [auto-tag]
     runs-on: obtrace-runners
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.auto-tag.outputs.tag || github.ref_name }}
       - name: Set version
