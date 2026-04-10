@@ -15,6 +15,7 @@ import { installResourceTiming } from "./resources";
 import { installLongTaskDetection } from "./longtasks";
 import { installMemoryTracking } from "./memory";
 import { installOfflineSupport } from "./offline";
+import { startPageSpan, endPageSpan, updatePageURL, getPageContext, setPageRootProcessor } from "./page-context";
 
 export type UserContext = { id?: string; email?: string; name?: string; [key: string]: unknown };
 
@@ -60,6 +61,7 @@ let stopRrwebRecording: (() => void) | null = null;
 
 function fanOutNavigation(): void {
   addCrumb({ timestamp: Date.now(), category: "navigation", message: window.location.href, level: "info" });
+  updatePageURL();
   for (const entry of instances) {
     const chunk = entry.replay.pushCustomEvent("navigation", {
       href: window.location.href,
@@ -220,6 +222,9 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const recipeSteps: ReplayStep[] = [];
   const cleanups: Array<() => void> = [];
 
+  setPageRootProcessor(otel.pageRootProcessor);
+  cleanups.push(startPageSpan(tracer, replay.sessionId));
+
   const entry: InstanceEntry = { client, sessionId: replay.sessionId, replay, config, recipeSteps, otel };
   instances.add(entry);
   replayBuffers.add(replay);
@@ -350,7 +355,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
           ...(context?.traceId ? { "obtrace.trace_id": context.traceId } : {}),
           ...context?.attrs,
         },
-      });
+      }, getPageContext());
       span.setStatus({ code: SpanStatusCode.ERROR, message });
       span.end();
     }
@@ -397,7 +402,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
         ...userAttrs(),
         ...context?.attrs,
       },
-    });
+    }, getPageContext());
     span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
     if (error instanceof Error) span.recordException(error);
     span.end();

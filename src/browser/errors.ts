@@ -2,6 +2,7 @@ import { type Tracer, SpanStatusCode } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import type { Logger } from "@opentelemetry/api-logs";
 import { addBreadcrumb, getBreadcrumbs } from "./breadcrumbs";
+import { getPageContext } from "./page-context";
 
 let processing = false;
 
@@ -41,7 +42,7 @@ export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, session
         },
       });
 
-      const span = tracer.startSpan("browser.error", { attributes: attrs });
+      const span = tracer.startSpan("browser.error", { attributes: attrs }, getPageContext());
       span.setStatus({ code: SpanStatusCode.ERROR, message });
       if (ev.error instanceof Error) {
         span.recordException(ev.error);
@@ -85,7 +86,7 @@ export function installBrowserErrorHooks(tracer: Tracer, logger: Logger, session
         },
       });
 
-      const span = tracer.startSpan("browser.unhandledrejection", { attributes: attrs });
+      const span = tracer.startSpan("browser.unhandledrejection", { attributes: attrs }, getPageContext());
       span.setStatus({ code: SpanStatusCode.ERROR, message: reason });
       if (ev.reason instanceof Error) {
         span.recordException(ev.reason);
