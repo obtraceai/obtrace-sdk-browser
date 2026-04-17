@@ -16,13 +16,11 @@ import { ZoneContextManager } from "@opentelemetry/context-zone";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import type { ObtraceSDKConfig } from "../shared/types";
 import { enrichSupabaseSpan, isSupabaseURL, parseSupabaseURL } from "../browser/supabase";
-import { PageRootProcessor } from "../browser/page-root-processor";
 
 export interface OtelHandles {
   tracer: Tracer;
   meter: Meter;
   loggerProvider: LoggerProvider;
-  pageRootProcessor: PageRootProcessor;
   shutdown: () => Promise<void>;
   forceFlush: () => Promise<void>;
 }
@@ -59,11 +57,9 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
     ? new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(sampleRate) })
     : undefined;
 
-  const pageRootProcessor = new PageRootProcessor();
-
   const tracerProvider = new WebTracerProvider({
     resource,
-    spanProcessors: [pageRootProcessor, new BatchSpanProcessor(traceExporter)],
+    spanProcessors: [new BatchSpanProcessor(traceExporter)],
     ...(sampler ? { sampler } : {}),
   });
 
@@ -260,5 +256,5 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
     await loggerProvider.shutdown();
   };
 
-  return { tracer, meter, loggerProvider, pageRootProcessor, shutdown, forceFlush };
+  return { tracer, meter, loggerProvider, shutdown, forceFlush };
 }

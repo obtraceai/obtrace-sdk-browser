@@ -15,7 +15,7 @@ import { installResourceTiming } from "./resources";
 import { installLongTaskDetection } from "./longtasks";
 import { installMemoryTracking } from "./memory";
 import { installOfflineSupport } from "./offline";
-import { startPageSpan, endPageSpan, updatePageURL, getPageContext, setPageRootProcessor } from "./page-context";
+import { startPageSpan, updatePageURL } from "./page-context";
 
 export type UserContext = { id?: string; email?: string; name?: string; [key: string]: unknown };
 
@@ -222,7 +222,6 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
   const recipeSteps: ReplayStep[] = [];
   const cleanups: Array<() => void> = [];
 
-  setPageRootProcessor(otel.pageRootProcessor);
   cleanups.push(startPageSpan(tracer, replay.sessionId));
 
   const entry: InstanceEntry = { client, sessionId: replay.sessionId, replay, config, recipeSteps, otel };
@@ -355,7 +354,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
           ...(context?.traceId ? { "obtrace.trace_id": context.traceId } : {}),
           ...context?.attrs,
         },
-      }, getPageContext());
+      });
       span.setStatus({ code: SpanStatusCode.ERROR, message });
       span.end();
     }
@@ -402,7 +401,7 @@ export function initBrowserSDK(config: ObtraceSDKConfig): BrowserSDK {
         ...userAttrs(),
         ...context?.attrs,
       },
-    }, getPageContext());
+    });
     span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
     if (error instanceof Error) span.recordException(error);
     span.end();

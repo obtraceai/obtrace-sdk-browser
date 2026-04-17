@@ -1,5 +1,4 @@
 import type { Tracer } from "@opentelemetry/api";
-import { getPageContext } from "./page-context";
 
 export function installLongTaskDetection(tracer: Tracer): () => void {
   if (typeof window === "undefined" || typeof PerformanceObserver === "undefined") return () => {};
@@ -12,7 +11,7 @@ export function installLongTaskDetection(tracer: Tracer): () => void {
           "longtask.duration_ms": entry.duration,
           "longtask.name": entry.name,
         },
-      }, getPageContext());
+      });
       span.end();
     }
   });

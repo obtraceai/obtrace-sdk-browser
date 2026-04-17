@@ -1,6 +1,6 @@
 import type { Tracer } from "@opentelemetry/api";
 import { addBreadcrumb, getElementSelector } from "./breadcrumbs";
-import { startClickSpan, endClickSpan, getPageContext } from "./page-context";
+import { startClickSpan, endClickSpan } from "./page-context";
 
 interface ClickEntry {
   selector: string;
@@ -49,7 +49,7 @@ export function installClickTracking(tracer: Tracer, sessionId: string): () => v
       addBreadcrumb({ timestamp: now, category: "ui.rage_click", message: selector, level: "warn" });
       const span = tracer.startSpan("browser.rage_click", {
         attributes: { "click.selector": selector, "click.count": sameElement.length, "session.id": sessionId },
-      }, getPageContext());
+      });
       span.end();
     }
 
@@ -67,7 +67,7 @@ export function installClickTracking(tracer: Tracer, sessionId: string): () => v
           addBreadcrumb({ timestamp: now, category: "ui.dead_click", message: selector, level: "warn" });
           const span = tracer.startSpan("browser.dead_click", {
             attributes: { "click.selector": selector, "session.id": sessionId },
-          }, getPageContext());
+          });
           span.end();
         }
         pendingDeadCheck = null;

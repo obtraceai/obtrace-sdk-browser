@@ -2,7 +2,6 @@ import { type Tracer, SpanStatusCode } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import type { Logger } from "@opentelemetry/api-logs";
 import { addBreadcrumb } from "./breadcrumbs";
-import { getPageContext } from "./page-context";
 
 const LEVEL_MAP: Record<string, "debug" | "info" | "warn" | "error"> = {
   debug: "debug",
@@ -104,7 +103,7 @@ export function installConsoleCapture(tracer: Tracer, logger: Logger, sessionId:
               "session.id": sessionId,
               ...attrs,
             },
-          }, getPageContext());
+          });
           span.setStatus({ code: SpanStatusCode.ERROR, message: message.slice(0, 1024) });
           if (isErrorObj) span.recordException(firstArg);
           span.end();
