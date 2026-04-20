@@ -18,11 +18,50 @@ import type { ObtraceSDKConfig } from "../shared/types";
 import { enrichSupabaseSpan, isSupabaseURL, parseSupabaseURL } from "../browser/supabase";
 
 const SUPABASE_PROPAGATE_REGEX = /\.supabase\.co\//;
+const LOCALHOST_PROPAGATE_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/;
+const SECOND_LEVEL_TLDS = new Set([
+  "com", "co", "org", "gov", "net", "edu", "ac", "gob", "mil", "or", "ne",
+]);
+const PAAS_PUBLIC_SUFFIXES = [
+  "vercel.app", "vercel.sh",
+  "netlify.app", "netlify.com",
+  "github.io",
+  "herokuapp.com",
+  "pages.dev",
+  "fly.dev",
+  "onrender.com",
+  "railway.app",
+  "ngrok.io", "ngrok-free.app",
+  "cloudfront.net",
+  "azurewebsites.net",
+  "appspot.com",
+  "firebaseapp.com", "web.app",
+];
+
+function deriveApexRegex(): RegExp | null {
+  if (typeof window === "undefined") return null;
+  const host = window.location.hostname;
+  if (!host) return null;
+  if (host === "localhost") return null;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return null;
+  if (PAAS_PUBLIC_SUFFIXES.some((s) => host === s || host.endsWith("." + s))) return null;
+
+  const parts = host.split(".");
+  if (parts.length < 2) return null;
+
+  const apexParts = parts.length >= 3 && SECOND_LEVEL_TLDS.has(parts[parts.length - 2])
+    ? parts.slice(-3)
+    : parts.slice(-2);
+  const apex = apexParts.join(".").replace(/\./g, "\\.");
+  return new RegExp(`^https?:\\/\\/([^\\/]+\\.)?${apex}(\\/|:|$)`);
+}
 
 function buildPropagateList(
   extra: string | RegExp | Array<string | RegExp> | undefined,
 ): Array<string | RegExp> {
-  const list: Array<string | RegExp> = [SUPABASE_PROPAGATE_REGEX];
+  const list: Array<string | RegExp> = [SUPABASE_PROPAGATE_REGEX, LOCALHOST_PROPAGATE_REGEX];
+  const apex = deriveApexRegex();
+  if (apex) list.push(apex);
   if (extra === undefined) return list;
   if (Array.isArray(extra)) list.push(...extra);
   else list.push(extra);
