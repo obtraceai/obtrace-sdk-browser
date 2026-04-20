@@ -17,6 +17,18 @@ import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import type { ObtraceSDKConfig } from "../shared/types";
 import { enrichSupabaseSpan, isSupabaseURL, parseSupabaseURL } from "../browser/supabase";
 
+const SUPABASE_PROPAGATE_REGEX = /\.supabase\.co\//;
+
+function buildPropagateList(
+  extra: string | RegExp | Array<string | RegExp> | undefined,
+): Array<string | RegExp> {
+  const list: Array<string | RegExp> = [SUPABASE_PROPAGATE_REGEX];
+  if (extra === undefined) return list;
+  if (Array.isArray(extra)) list.push(...extra);
+  else list.push(extra);
+  return list;
+}
+
 export interface OtelHandles {
   tracer: Tracer;
   meter: Meter;
@@ -211,10 +223,12 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
     }
   };
 
+  const propagateTraceHeaderCorsUrls = buildPropagateList(config.propagation?.propagateTo);
+
   if (config.instrumentGlobalFetch !== false) {
     instrumentations.push(
       new FetchInstrumentation({
-        propagateTraceHeaderCorsUrls: /.*/,
+        propagateTraceHeaderCorsUrls,
         ignoreUrls: [ingestPattern],
         clearTimingResources: true,
         applyCustomAttributesOnSpan: applySupabaseAttrs,
@@ -225,7 +239,7 @@ export function setupOtelWeb(config: ObtraceSDKConfig & { sessionId?: string }):
   if (config.instrumentXHR !== false) {
     instrumentations.push(
       new XMLHttpRequestInstrumentation({
-        propagateTraceHeaderCorsUrls: /.*/,
+        propagateTraceHeaderCorsUrls,
         ignoreUrls: [ingestPattern],
         clearTimingResources: true,
       })

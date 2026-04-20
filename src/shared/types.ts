@@ -47,6 +47,7 @@ export interface ObtraceSDKConfig {
     enabled: boolean;
     headerName?: string;
     sessionHeaderName?: string;
+    propagateTo?: string | RegExp | Array<string | RegExp>;
   };
   validateSemanticMetrics?: boolean;
   debug?: boolean;
